@@ -49,10 +49,9 @@ class User:
         """
         if len(args) == 2:
             self.un, pw = args[0], args[1]
-        if len(args) == 6:
+        elif len(args) == 6:
             self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key = \
             args[0], args[1], args[2], args[3], args[4], args[5]
-
         else:
             raise TypeError("Incorrect number of arguments for User")
 
@@ -72,36 +71,34 @@ class User:
         """
         # Locate and retrieve public keys
         try:
-            pub_key = keyserver.Get(username+"pub_key")
-            verify_key = keyserver.Get(username+"verify_key")
+            pub_key = keyserver.Get(username+"_pub_key")
+            verify_key = keyserver.Get(username+"_verify_key")
         except ValueError:
             raise util.DropboxError("Authentication Error- No such User exists.")
         
         # Locate and retrieve private/sign key
         try:
-            priv_key_get = dataserver.Get(create_memloc(self.base_key, username+"priv_key_storage"))
+            priv_key_get = dataserver.Get(generate_memloc(self.base_key, username+"_priv_key_storage"))
         except:
             raise util.DropboxError("Authentication Error- Check Your Username/Password!")
-        priv_key = crypto.SymmetricDecrypt(crypto.HashKDF(self.base_key, "priv_key_storage"),
-                                        priv_key_get)
+        priv_key = crypto.AsymmetricDecryptKey.from_bytes(sym_decrypt(self.base_key, "_priv_key_storage", priv_key_get))
         
         try:
-            sign_key_get = dataserver.Get(create_memloc(self.base_key, username+"sign_key_storage"))
+            sign_key_get = dataserver.Get(generate_memloc(self.base_key, username+"_sign_key_storage"))
         except:
             raise util.DropboxError("Authentication Error- Check Your Username/Password!")
-        sign_key = crypto.SymmetricDecrypt(crypto.HashKDF(self.base_key, "sign_key_storage"),
-                                        sign_key_get)
+        sign_key = crypto.SignatureSignKey.from_bytes(sym_decrypt(self.base_key, "_sign_key_storage", sign_key_get))
 
         # Confirm encryption/decryption keys
         auth_msg = b"The Treaty of Versailles[4] was a peace treaty signed on 28 June 1919."
         enc_msg = crypto.AsymmetricEncrypt(pub_key, auth_msg)
-        dec_msg = crypto.AsymmetricDecrypt(crypto.AsymmetricDecryptKey.from_bytes(priv_key), enc_msg)
+        dec_msg = crypto.AsymmetricDecrypt(priv_key, enc_msg)
 
         if dec_msg != auth_msg:
             raise util.DropboxError("Authentication Error- Check Your Username/Password!")
         
         # Confirm signature/verify keys
-        sign_msg = crypto.SignatureSign(crypto.SignatureSignKey.from_bytes(sign_key),
+        sign_msg = crypto.SignatureSign(sign_key,
                                         enc_msg)
         verify_msg = crypto.SignatureVerify(verify_key, enc_msg, sign_msg)
         if verify_msg != True:
@@ -119,15 +116,34 @@ class User:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
         # TODO: Implement
+        body, tail = slice_file(data)
+        block_count = 2
         
-        # iterate over chunks of the bytes
-        for i in range(0, len(data)):
-            pass
+        # check if we need to separate file into multiple blocks
+        if body == tail:
+            block_count = 1
 
+        # initialize metadata: sharing list, block count
+        share_list = util.ObjectToBytes([])
+        block_count_loc = generate_memloc(self.base_key, filename+"_num_blocks")
+        share_list_loc = generate_memloc(self.base_key, filename+"_sharing")
 
+        # encrypt and store metadata
+        enc_num_blocks, _ = sym_enc_sign(self.base_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
+        enc_sharing, _ = sym_enc_sign(self.base_key, filename+"_sharing", share_list)
+        dataserver.Set(generate_memloc(self.base_key, filename+"_num_blocks"), enc_num_blocks)
+        dataserver.Set(generate_memloc(self.base_key, filename+"_sharing"), enc_sharing)
 
-
-        raise util.DropboxError("Not Implemented")
+        # file slice memlocs
+        body_loc = generate_memloc(self.base_key, f'{filename}_block_{1}')
+        tail_loc = generate_memloc(self.base_key, f'{filename}_block_{2}')
+        
+        # encrypt + sign
+        enc_body, _ = sym_enc_sign(self.base_key, f'{filename}_block_{1}', body)
+        dataserver.Set(body_loc, enc_body)
+        if block_count == 2:
+            enc_tail, _ = sym_enc_sign(self.base_key, f'{filename}_block_{2}', tail)
+            dataserver.Set(tail_loc, enc_tail)
 
     def download_file(self, filename: str) -> bytes:
         """
@@ -169,17 +185,77 @@ class User:
         # TODO: Implement
         raise util.DropboxError("Not Implemented")
     
+def slice_file(data: bytes) -> tuple[bytes, bytes]:
+    """
+    tk - docstring
+    """
+    size = len(data)
+
+    # data is smaller than 16 bytes - no need to slice
+    if size <= 16:
+        return data, data
+
+    # take at most the last 16 bytes
+    tail_size = size % 16 if size % 16 != 0 else 16
+    body = data[0:size - tail_size]
+    tail = data[tail_size:size]
+
+    return body, tail
+    
 def encrypt(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
     Derives a new key from the base_key to encrypt the given data, then signs it using a given
     sign_key.
     """
-    enc_key = crypto.HashKDF(base_key, purpose)
+    enc_key = crypto.HashKDF(base_key, purpose+"_sym_enc")
     enc_data = crypto.SymmetricEncrypt(enc_key, crypto.SecureRandom(16), data)
     return enc_data
 
-def create_memloc(base_key: bytes, purpose: str) -> bytes:
-    return crypto.HashKDF(base_key, purpose+"_memloc")
+def sym_decrypt(base_key: bytes, purpose: str, data: bytes) -> bytes:
+    enc_key = crypto.HashKDF(base_key, purpose+"_sym_enc")
+    dec_data = crypto.SymmetricDecrypt(enc_key, data)
+    return dec_data
+
+def sym_hmac(base_key: bytes, purpose: str, data: bytes) -> bytes:
+    """
+    tk - docstring
+    only to be used on encrypted things
+    """
+    sign_key = crypto.HashKDF(base_key, purpose+"_sym_sign")
+    hmac = crypto.HMAC(sign_key, data)
+    return hmac
+
+def sym_enc_sign(base_key: bytes, purpose: str, data: bytes) -> None:
+    """
+    tk - docstring
+    encrypt then mac
+    """
+    enc_data = encrypt(base_key, purpose, data)
+    hmac = sym_hmac(base_key, purpose, enc_data)
+    dataserver.Set(generate_memloc(base_key, purpose+"_hmac_store"), hmac)
+    return enc_data, hmac
+
+def sym_verify_dec(base_key: bytes, purpose: str, data: bytes) -> bytes:
+    """
+    tk - docstring
+    """
+    hmac = sym_hmac(base_key, purpose, data)
+    try:
+        stored_hmac = dataserver.Get(generate_memloc(base_key, purpose+"_hmac_store"))
+    except ValueError:
+        util.DropboxError("No signature stored")
+
+    if not crypto.HMACEqual(hmac, stored_hmac):
+        util.DropboxError("Integrity error - HMAC could not be verified")
+
+    return dec_data
+
+def generate_memloc(base_key: bytes, purpose: str) -> memloc:
+    """
+    tk - dosctring
+    """
+    bytestring = crypto.HashKDF(base_key, purpose+"_memloc")
+    return memloc.MakeFromBytes(bytestring)
 
 
 def create_user(username: str, password: str) -> User:
@@ -199,24 +275,24 @@ def create_user(username: str, password: str) -> User:
         raise util.DropboxError("Usernames cannot be empty.")
     
     try:
-        keyserver.Get(username+"pub_key")
+        keyserver.Get(username+"_pub_key")
     except ValueError: # if no entry with the same username exists in keyserver, we may continue
         pass
     else:
         raise util.DropboxError("Username already exists; please choose a new username.")
 
     # Store public keys in the Keyserver
-    keyserver.Set(username+"pub_key", 
+    keyserver.Set(username+"_pub_key", 
                   pub_key)
-    keyserver.Set(username+"verify_key", 
+    keyserver.Set(username+"_verify_key", 
                   verify_key)
 
     # Store private keys in the Dataserver
-    dataserver.Set(create_memloc(current_user.base_key, username+"priv_key_storage"),
-                   encrypt(current_user.base_key, "priv_key_storage", bytes(priv_key))
+    dataserver.Set(generate_memloc(current_user.base_key, username+"_priv_key_storage"),
+                   encrypt(current_user.base_key, "_priv_key_storage", bytes(priv_key))
                    )
-    dataserver.Set(create_memloc(current_user.base_key, username+"sign_key_storage"),
-                   encrypt(current_user.base_key, "sign_key_storage", bytes(sign_key))
+    dataserver.Set(generate_memloc(current_user.base_key, username+"_sign_key_storage"),
+                   encrypt(current_user.base_key, "_sign_key_storage", bytes(sign_key))
                    )
     
     return current_user
@@ -236,5 +312,8 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-create_user("bob", "pw")
-authenticate_user("bob", "sw")
+u = create_user("bob", "pw")
+authenticate_user("bob", "pw")
+u.upload_file("filename", b'hello')
+u.upload_file("filename2", b'hello my name is bob this is a long file.')
+apauthenticate_user("bob", "sw")
