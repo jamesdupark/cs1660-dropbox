@@ -86,8 +86,13 @@ class User:
         except:
             raise util.DropboxError(
                 "Authentication Error- Check Your Username/Password!")
-        priv_key = crypto.AsymmetricDecryptKey.from_bytes(
-            sym_decrypt(self.base_key, "_priv_key_storage", priv_key_get))
+        try: 
+            priv_key = crypto.AsymmetricDecryptKey.from_bytes(
+                sym_decrypt(self.base_key, "_priv_key_storage", priv_key_get))
+        except:
+            raise util.DropboxError(
+                "Authentication Error - Data tampered!"
+            )
 
         try:
             sign_key_get = dataserver.Get(generate_memloc(
@@ -200,7 +205,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/append-file.html
         """
-        # TODO: Implement
         # get num_blocks
         try:
             block_count_loc = generate_memloc(
@@ -480,4 +484,5 @@ authenticate_user("bob", "pw")
 u.upload_file("filename", b'hello')
 u.upload_file("filename2", b'hello my name is bob this is a long file.')
 u.upload_file("emptyfile", b'')
-# authenticate_user("bob", "sw")
+
+
