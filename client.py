@@ -131,6 +131,15 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
+        # generate base key for this file
+        base_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
+        base_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+
+        # encrypt/store base key
+        enc_base_key, _ = sym_enc_sign(self.base_key, filename+"_master_key", base_key)
+        dataserver.Set(base_key_loc, enc_base_key)
+        
+        # slice file
         body, tail = slice_file(data)
         block_count = 2
 
@@ -141,28 +150,28 @@ class User:
         # initialize metadata: sharing list, block count
         share_list = util.ObjectToBytes([])
         block_count_loc = generate_memloc(
-            self.base_key, filename+"_num_blocks")
-        share_list_loc = generate_memloc(self.base_key, filename+"_sharing")
+            base_key, filename+"_num_blocks")
+        share_list_loc = generate_memloc(base_key, filename+"_sharing")
 
         # encrypt and store metadata
         enc_num_blocks, _ = sym_enc_sign(
-            self.base_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
+            base_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
         enc_sharing, _ = sym_enc_sign(
-            self.base_key, filename+"_sharing", share_list)
+            base_key, filename+"_sharing", share_list)
         dataserver.Set(block_count_loc, enc_num_blocks)
         dataserver.Set(share_list_loc, enc_sharing)
 
         # file slice memlocs
-        body_loc = generate_memloc(self.base_key, f'{filename}_block_{0}')
-        tail_loc = generate_memloc(self.base_key, f'{filename}_block_{1}')
+        body_loc = generate_memloc(base_key, f'{filename}_block_{0}')
+        tail_loc = generate_memloc(base_key, f'{filename}_block_{1}')
 
         # encrypt + sign, store body (and tail if applicable)
         enc_body, _ = sym_enc_sign(
-            self.base_key, f'{filename}_block_{0}', body)
+            base_key, f'{filename}_block_{0}', body)
         dataserver.Set(body_loc, enc_body)
         if block_count == 2:
             enc_tail, _ = sym_enc_sign(
-                self.base_key, f'{filename}_block_{1}', tail)
+                base_key, f'{filename}_block_{1}', tail)
             dataserver.Set(tail_loc, enc_tail)
 
     def download_file(self, filename: str) -> bytes:
@@ -170,16 +179,26 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/download-file.html
         """
+        # get base_key
+        try:
+            base_key_loc = generate_memloc(
+                self.base_key, filename+"_master_key")
+
+            # decrypt base key
+            enc_base_key = dataserver.Get(base_key_loc)
+            base_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_base_key)
+        except ValueError:
+            raise util.DropboxError("No such file found.")
+
         # get num_blocks
         try:
             block_count_loc = generate_memloc(
-                self.base_key, filename+"_num_blocks")
+                base_key, filename+"_num_blocks")
             enc_block_count = dataserver.Get(block_count_loc)
             block_count = int.from_bytes(sym_verify_dec(
-                self.base_key, filename+"_num_blocks", enc_block_count), "little")
+                base_key, filename+"_num_blocks", enc_block_count), "little")
         except ValueError:
-            # failed dataserver get - no filename found (likely)
-            raise util.DropboxError("No such file found")
+            raise util.DropboxError("File metadata corrupted.")
 
         # iterate through all blocks and download them
         doc = bytes()
@@ -187,12 +206,12 @@ class User:
             try:
                 # retrieve block
                 curr_loc = generate_memloc(
-                    self.base_key, f'{filename}_block_{i}')
+                    base_key, f'{filename}_block_{i}')
                 curr_block = dataserver.Get(curr_loc)
 
                 # decrypt and verify block - this function throws util.DropboxError if integrity violation is detected
                 dec_block = sym_verify_dec(
-                    self.base_key, f'{filename}_block_{i}', curr_block)
+                    base_key, f'{filename}_block_{i}', curr_block)
             except ValueError:
                 raise util.DropboxError(
                     "File could not be found due to malicious action.")
@@ -205,13 +224,25 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/append-file.html
         """
+        # get base_key
+        try:
+            base_key_loc = generate_memloc(
+                self.base_key, filename+"_master_key")
+
+            # decrypt base key
+            enc_base_key = dataserver.Get(base_key_loc)
+            base_key = sym_verify_dec(
+                self.base_key, filename+"_master_key", enc_base_key)
+        except ValueError:
+            raise util.DropboxError("No such file found.")
+
         # get num_blocks
         try:
             block_count_loc = generate_memloc(
-                self.base_key, filename+"_num_blocks")
+                base_key, filename+"_num_blocks")
             enc_block_count = dataserver.Get(block_count_loc)
             block_count = int.from_bytes(sym_verify_dec(
-                self.base_key, filename+"_num_blocks", enc_block_count), "little")
+                base_key, filename+"_num_blocks", enc_block_count), "little")
         except ValueError:
             # failed dataserver get - no filename found (likely)
             raise util.DropboxError("No such file found")
@@ -220,12 +251,12 @@ class User:
         try:
             # retrieve block
             last_block_loc = generate_memloc(
-                self.base_key, f'{filename}_block_{block_count - 1}')
+                base_key, f'{filename}_block_{block_count - 1}')
             last_block = dataserver.Get(last_block_loc)
 
             # decrypt and verify block - this function throws util.DropboxError if integrity violation is detected
             dec_block = sym_verify_dec(
-                self.base_key, f'{filename}_block_{block_count - 1}', last_block)
+                base_key, f'{filename}_block_{block_count - 1}', last_block)
         except ValueError:
             raise util.DropboxError(
                 "File could not be found due to malicious action.")
@@ -236,26 +267,26 @@ class User:
 
         # memlocs
         body_loc = generate_memloc(
-            self.base_key, f'{filename}_block_{block_count - 1}')
+            base_key, f'{filename}_block_{block_count - 1}')
 
         # encrypt + sign, store body
         enc_body, _ = sym_enc_sign(
-            self.base_key, f'{filename}_block_{block_count - 1}', body)
+            base_key, f'{filename}_block_{block_count - 1}', body)
         dataserver.Set(body_loc, enc_body)
 
         
         # if slicing is necessary - increment block_count, store tail
         if body != tail:
             tail_loc = generate_memloc(
-                self.base_key, f'{filename}_block_{block_count}')
+                base_key, f'{filename}_block_{block_count}')
             enc_tail, _ = sym_enc_sign(
-                self.base_key, f'{filename}_block_{block_count}', tail)
+                base_key, f'{filename}_block_{block_count}', tail)
             dataserver.Set(tail_loc, enc_tail)
 
             # increment number of blocks and re-store
             block_count += 1
             enc_num_blocks, _ = sym_enc_sign(
-                self.base_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
+                base_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
             dataserver.Set(block_count_loc, enc_num_blocks)
 
     def share_file(self, filename: str, recipient: str) -> None:
@@ -484,5 +515,4 @@ authenticate_user("bob", "pw")
 u.upload_file("filename", b'hello')
 u.upload_file("filename2", b'hello my name is bob this is a long file.')
 u.upload_file("emptyfile", b'')
-
-
+# authenticate_user("bob", "sw")
