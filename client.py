@@ -294,16 +294,92 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/share-file.html
         """
-        # TODO: Implement
-        raise util.DropboxError("Not Implemented")
+        # get base key for file
+        try:
+            base_key_loc = generate_memloc(
+                self.base_key, filename+"_master_key"
+            )
+
+            enc_base_key = dataserver.Get(base_key_loc)
+            base_key = sym_verify_dec(
+                self.base_key, filename+"_master_key", enc_base_key)
+        except ValueError:
+            raise util.DropboxError("No such file found.")
+        
+        # generate memlocs for common access
+        sharing_string = filename+"sharing_str_"+self.un+"_"+recipient
+        sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+        sharing_memloc = generate_memloc(
+            sharing_key, filename+"_sharing_loc_"+self.un+"_"+recipient
+        )
+
+        # get recipient public key
+        try:
+            recipient_pub_key = keyserver.Get(recipient+"_pub_key")
+        except ValueError:
+            raise util.DropboxError("No such recipient found.")
+        
+        # create asymmetric key encryption and signature for base_key
+        enc_file_base_key, sign_file_base_key = asym_enc_sign(
+            recipient_pub_key, self.sign_key, base_key
+            )
+        
+        # determine if there is already a dict between the two users; if not, create one
+        try:
+            dataserver.Get(sharing_memloc)
+        except ValueError:
+            dict = {}
+            dict_bytes = util.ObjectToBytes(dict)
+            dataserver.Set(sharing_memloc, dict_bytes)
+
+        sharing_dict_bytes = dataserver.Get(sharing_memloc)
+        sharing_dict = util.BytesToObject(sharing_dict_bytes)
+        sharing_dict[filename] = [enc_file_base_key, sign_file_base_key]
+        sharing_dict_bytes = util.ObjectToBytes(sharing_dict)
+        
+        dataserver.Set(sharing_memloc, sharing_dict_bytes)
 
     def receive_file(self, filename: str, sender: str) -> None:
         """
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/receive-file.html
         """
-        # TODO: Implement
-        raise util.DropboxError("Not Implemented")
+        # find the sharing memloc
+        sharing_string = filename+"sharing_str_"+sender+"_"+self.un
+        sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+        sharing_memloc = generate_memloc(
+            sharing_key, filename+"_sharing_loc_"+sender+"_"+self.un
+        )
+
+        # attempt to retrieve dict
+        try:
+            sharing_dict_bytes = dataserver.Get(sharing_memloc)
+        except ValueError:
+            raise util.DropboxError("No such file shared by recipient.")
+        
+        # decrypt and verify
+        sharing_dict = util.BytesToObject(sharing_dict_bytes)
+        file_elements = sharing_dict[filename]
+        enc_file_key = file_elements[0]
+        file_signature = file_elements[1]
+
+        try:
+            crypto.SignatureVerify(
+                keyserver.Get(sender+"_verify_key"),
+                enc_file_key,
+                file_signature
+            )
+        except:
+            raise util.DropboxError("File integrity damaged.")
+        
+        # get the file base key
+        file_key = crypto.AsymmetricDecrypt(self.priv_key, enc_file_key)
+
+        # store this file base key for this user
+        base_key_loc = generate_memloc(
+                self.base_key, filename+"_master_key")
+        enc_base_key, _ = sym_enc_sign(self.base_key, filename+"_master_key", file_key)
+        dataserver.Set(base_key_loc, enc_base_key)
 
     def revoke_file(self, filename: str, old_recipient: str) -> None:
         """
@@ -450,6 +526,16 @@ def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     bytestring = crypto.HashKDF(base_key, purpose+"_memloc")
     return memloc.MakeFromBytes(bytestring)
 
+def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey, sign_key: crypto.SignatureSignKey, data: bytes) -> None:
+    enc_data = crypto.AsymmetricEncrypt(enc_key, data)
+    sign_data = crypto.SignatureSign(sign_key, enc_data)
+    return enc_data, sign_data
+
+    #     enc_data = encrypt(base_key, purpose, data)
+    # hmac = sym_hmac(base_key, purpose, enc_data)
+    # dataserver.Set(generate_memloc(base_key, purpose+"_hmac_store"), hmac)
+    # return enc_data, hmac
+
 
 def create_user(username: str, password: str) -> User:
     """
@@ -510,9 +596,15 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-u = create_user("bob", "pw")
-authenticate_user("bob", "pw")
-u.upload_file("filename", b'hello')
-u.upload_file("filename2", b'hello my name is bob this is a long file.')
-u.upload_file("emptyfile", b'')
-# authenticate_user("bob", "sw")
+# u = create_user("bob", "pw")
+# authenticate_user("bob", "pw")
+# u.upload_file("filename", b'hello')
+# u.upload_file("filename2", b'hello my name is bob this is a long file.')
+# u.upload_file("emptyfile", b'')
+# # authenticate_user("bob", "sw")
+
+u = create_user("John", "pw")
+u2 = create_user("Paul", "pw")
+u.upload_file("filename", b"file_contents")
+u.share_file("filename", "Paul")
+u2.receive_file("filename", "John")
