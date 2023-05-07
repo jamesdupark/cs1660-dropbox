@@ -236,70 +236,21 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/append-file.html
         """
-        # get file_key
-        file_key, _, first_time = check_file_status(self, filename)
-        if first_time == True:
-            raise util.DropboxError("No such file found.")
-        
-        # get num_blocks
-        try:
-            block_count_loc = generate_memloc(
-                file_key, filename+"_num_blocks"
-            )
-            enc_block_count = dataserver.Get(block_count_loc)
-            block_count = int.from_bytes(sym_verify_dec(
-                file_key, filename+"_num_blocks", enc_block_count), "little")
-        except ValueError:
-            raise util.DropboxError("No such file found.")
-        
-        # get last block
-        try:
-            # retrieve block
-            last_block_loc = generate_memloc(
-                file_key, f'{filename}_block_{block_count - 1}'
-            )
-            last_block = dataserver.Get(last_block_loc)
-            
-            # decrypt and verify block - this function throws util.DropboxError if integrity violation is detected
-            dec_block = sym_verify_dec(
-                file_key, f'{filename}_block_{block_count - 1}', last_block
-            )
-        except ValueError:
-            raise util.DropboxError("File could not be found due to malicious action.")
-        
-        # combine and slice
-        to_append = dec_block + data
-        body, tail = slice_file(to_append)
+        u1 = c.create_user("usr1", "pswd")
+        u2 = c.create_user("usr2", "pswd")
 
-        # memlocs
-        body_loc = generate_memloc(
-            file_key, f'{filename}_block_{block_count - 1}'
-        )
+        u1.upload_file("shared_file", b'shared data')
+        u1.share_file("shared_file", "usr2")
 
-        # encrypt + sign, store body
-        enc_body, _ = sym_enc_sign(
-            file_key, f'{filename}_block_{block_count - 1}', body
-        )
-        dataserver.Set(body_loc, enc_body)
+        u2.receive_file("shared_file", "usr1")
+        down_data = u2.download_file("shared_file")
 
-        # if slicing is necessary - increment block_count, store tail
-        if body != tail:
-            tail_loc = generate_memloc(
-                file_key, f'{filename}_block_{block_count}'
-            )
-            enc_tail, _ = sym_enc_sign(
-                file_key, f'{filename}_block_{block_count}', tail
-            )
-            dataserver.Set(tail_loc, enc_tail)
+        self.assertEqual(down_data, b'shared data')
 
-            # increment number of blocks and re-store
-            block_count += 1
-            enc_num_blocks, _ = sym_enc_sign(
-                file_key, filename+"_num_blocks", block_count.to_bytes(16, "little")
-            )
-            dataserver.Set(block_count_loc, enc_num_blocks)
-        
-    def share_file(self, filename: str, recipient: str) -> None:
+        u1.revoke_file("shared_file", "usr2")
+        self.assertRaises(util.DropboxError, lambda: u2.download_file("shared_file"))
+
+    def test_download_error(self):
         """
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/share-file.html
