@@ -68,7 +68,8 @@ class User:
         # create and push empty shared file dict to the dataserver
         shared_file_loc = generate_memloc(self.base_key, "shared_file_dict")
         shared_file_bytes = util.ObjectToBytes(self.shared_files)
-        enc_shared_files, _ = sym_enc_sign(self.base_key, "shared_file_dict", shared_file_bytes)
+        enc_shared_files, _ = sym_enc_sign(
+            self.base_key, "shared_file_dict", shared_file_bytes)
         dataserver.Set(shared_file_loc, enc_shared_files)
 
         self.shared_with = dict()
@@ -104,7 +105,7 @@ class User:
         except:
             raise util.DropboxError(
                 "Authentication Error- Check Your Username/Password!")
-        try: 
+        try:
             priv_key = crypto.AsymmetricDecryptKey.from_bytes(
                 sym_decrypt(self.base_key, "_priv_key_storage", priv_key_get))
         except:
@@ -140,9 +141,11 @@ class User:
 
         # pull shared files from dataserver
         try:
-            shared_file_loc = generate_memloc(self.base_key, "shared_file_dict")
+            shared_file_loc = generate_memloc(
+                self.base_key, "shared_file_dict")
             enc_shared_file_bytes = dataserver.Get(shared_file_loc)
-            dec_shared_file_bytes = sym_verify_dec(self.base_key, "shared_file_dict", enc_shared_file_bytes)
+            dec_shared_file_bytes = sym_verify_dec(
+                self.base_key, "shared_file_dict", enc_shared_file_bytes)
             shared_file_dict = util.BytesToObject(dec_shared_file_bytes)
         except ValueError:
             raise util.DropboxError("No shared files dictionary found!")
@@ -151,7 +154,8 @@ class User:
         try:
             shared_w_loc = generate_memloc(self.base_key, "shared_with_dict")
             enc_shared_w_bytes = dataserver.Get(shared_w_loc)
-            dec_shared_file_bytes = sym_verify_dec(self.base_key, "shared_with_dict", enc_shared_w_bytes)
+            dec_shared_file_bytes = sym_verify_dec(
+                self.base_key, "shared_with_dict", enc_shared_w_bytes)
             shared_with = util.BytesToObject(dec_shared_file_bytes)
         except ValueError:
             raise util.DropboxError("No shared files dictionary found!")
@@ -172,16 +176,18 @@ class User:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
         # is_owner = check_owner(self, filename)
-        # if you're not the owner, the file might've been revoked (and the file_key changed) so 
-            # update your file_key
-        
+        # if you're not the owner, the file might've been revoked (and the file_key changed) so
+        # update your file_key
+
         generate_metadata = False
 
         # check if a file_key already exists; if so, use the same one. if not, make new file_key
-        try:  
-            file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+        try:
+            file_key_loc = generate_memloc(
+                self.base_key, filename+"_master_key")
             file_key = sym_verify_dec(
-                self.base_key, filename+"_master_key", dataserver.Get(file_key_loc)
+                self.base_key, filename +
+                "_master_key", dataserver.Get(file_key_loc)
             )
 
             # download metadata
@@ -192,11 +198,13 @@ class User:
         except ValueError:
             generate_metadata = True
             # generate file key for this file
-            file_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
+            file_key = crypto.HashKDF(
+                self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
             # encrypt & store file key
-            enc_file_key, _ = sym_enc_sign(self.base_key, filename+"_master_key", file_key)
+            enc_file_key, _ = sym_enc_sign(
+                self.base_key, filename+"_master_key", file_key)
             dataserver.Set(file_key_loc, enc_file_key)
-        
+
         # slice file
         body, tail = slice_file(data)
         block_count = 2
@@ -250,8 +258,8 @@ class User:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/download-file.html
         """
         # is_owner = check_owner(self, filename)
-        # if you're not the owner, the file might've been revoked (and the file_key changed) so 
-            # update your file_key
+        # if you're not the owner, the file might've been revoked (and the file_key changed) so
+        # update your file_key
 
         # get file_key
         try:
@@ -260,10 +268,11 @@ class User:
 
             # decrypt base key
             enc_file_key = dataserver.Get(file_key_loc)
-            file_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_file_key)
+            file_key = sym_verify_dec(
+                self.base_key, filename+"_master_key", enc_file_key)
         except ValueError:
             raise util.DropboxError("No such file found.")
-        
+
         # get metadata
         try:
             meta_loc = generate_memloc(file_key, "metadata")
@@ -298,7 +307,6 @@ class User:
             doc += dec_block
 
         return doc
-        
 
     def append_file(self, filename: str, data: bytes) -> None:
         """
@@ -306,8 +314,8 @@ class User:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/append-file.html
         """
         # is_owner = check_owner(self, filename)
-        # if you're not the owner, the file might've been revoked (and the file_key changed) so 
-            # update your file_key
+        # if you're not the owner, the file might've been revoked (and the file_key changed) so
+        # update your file_key
 
         # get file_key
         try:
@@ -368,7 +376,6 @@ class User:
             file_key, f'{filename}_block_{block_count - 1}', body)
         dataserver.Set(body_loc, enc_body)
 
-        
         # if slicing is necessary - increment block_count, store tail
         if body != tail:
             tail_loc = generate_memloc(
@@ -396,9 +403,11 @@ class User:
         """
         # find filename's file_key
         try:
-            file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+            file_key_loc = generate_memloc(
+                self.base_key, filename+"_master_key")
             enc_file_key = dataserver.Get(file_key_loc)
-            file_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_file_key)
+            file_key = sym_verify_dec(
+                self.base_key, filename+"_master_key", enc_file_key)
         except ValueError:
             raise util.DropboxError("No such file found.")
 
@@ -414,7 +423,7 @@ class User:
                 return
         except ValueError:
             raise util.DropboxError("shared_with dictionary not found!")
-        
+
         # generate common memloc
         sharing_string = filename+"_sharing_"+self.un+"_"+recipient
         sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
@@ -422,29 +431,38 @@ class User:
             sharing_key, filename+"_sharing_"+self.un+"_"+recipient
         )
 
+        print(sharing_string, sharing_key, shared_dict_loc)
+
         # get recipient pub_key
         try:
             recipient_pub_key = keyserver.Get(recipient+"_pub_key")
         except ValueError:
             raise util.DropboxError("No such recipient found.")
-        
+
         # create assymetric key encryption and signature for file_key
         enc_file_key, file_signature = asym_enc_sign(
             recipient_pub_key, self.sign_key, file_key
         )
 
         # determine if there is a shared dict already; if not, create
-        try: 
+        try:
             dataserver.Get(shared_dict_loc)
         except ValueError:
             shared_dict_bytes = util.ObjectToBytes(dict())
-            dataserver.Set(shared_dict_loc, shared_dict_bytes)
+            enc_shared_dict, _ = sym_enc_sign(
+                sharing_key, sharing_string, shared_dict_bytes)
+            dataserver.Set(shared_dict_loc, enc_shared_dict)
 
         # add file_key and file_signature to shared_dict_loc
-        shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
+        enc_shared_dict = dataserver.Get(shared_dict_loc)
+        dec_shared_dict = sym_verify_dec(
+            sharing_key, sharing_string, enc_shared_dict)
+        shared_dict = util.BytesToObject(dec_shared_dict)
         shared_dict[filename] = [enc_file_key, file_signature]
         shared_dict_bytes = util.ObjectToBytes(shared_dict)
-        dataserver.Set(shared_dict_loc, shared_dict_bytes)
+        enc_shared_dict, _ = sym_enc_sign(
+            sharing_key, sharing_string, shared_dict_bytes)
+        dataserver.Set(shared_dict_loc, enc_shared_dict)
 
         # add recipient to file sharing metadata
 
@@ -453,10 +471,10 @@ class User:
             self.shared_with[filename].append(recipient)
         else:
             self.shared_with[filename] = [recipient]
-        
+
         # update shared_with on dataserver
         shared_with_loc = generate_memloc(
-                self.base_key, "shared_with_dict")
+            self.base_key, "shared_with_dict")
         shared_with_bytes = util.ObjectToBytes(self.shared_with)
         enc_shared_with, _ = sym_enc_sign(
             self.base_key, "shared_with_dict", shared_with_bytes)
@@ -488,7 +506,9 @@ class User:
             shared_dict_loc = generate_memloc(
                 sharing_key, filename+"_sharing_"+sender+"_"+self.un
             )
-            shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
+            enc_shared_dict = dataserver.Get(shared_dict_loc)
+            shared_dict = util.BytesToObject(sym_verify_dec(
+                sharing_key, sharing_string, enc_shared_dict))
             if len(shared_dict[filename]) == 0:
                 raise util.DropboxError("File has been revoked!")
         except ValueError:
@@ -501,7 +521,8 @@ class User:
         # decrypt file_key and verify signature
         try:
             crypto.SignatureVerify(
-                keyserver.Get(sender+"_verify_key"), enc_file_key, file_signature
+                keyserver.Get(
+                    sender+"_verify_key"), enc_file_key, file_signature
             )
         except:
             raise util.DropboxError("File corrupted.")
@@ -529,7 +550,7 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/revoke-file.html
         """
-        ## go to old metadata and set "current" to false and remove the user from the share list
+        # go to old metadata and set "current" to false and remove the user from the share list
         # get flie key
         try:
             file_key_loc = generate_memloc(
@@ -590,13 +611,33 @@ class User:
         # remove from shared_with
         self.shared_with[filename].remove(old_recipient)
 
+        # remove from shared dict
+        try:
+            sharing_string = filename+"_sharing_"+self.un+"_"+old_recipient
+            sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+            shared_dict_loc = generate_memloc(sharing_key, sharing_string)
+
+            enc_shared_dict = dataserver.Get(shared_dict_loc)
+            shared_dict = util.BytesToObject(sym_verify_dec(
+                sharing_key, sharing_string, enc_shared_dict))
+
+            shared_dict[filename] = []
+
+            # add file_key and file_signature to shared_dict_loc
+            shared_dict_bytes = util.ObjectToBytes(shared_dict)
+            enc_shared_dict, _ = sym_enc_sign(
+                sharing_key, sharing_string, shared_dict_bytes)
+            dataserver.Set(shared_dict_loc, enc_shared_dict)
+        except ValueError:
+            raise util.DropboxError("No such file shared with "+self.un+".")
+
         # call upload_flie on the key
         self.upload_file(filename, data)
 
         # call share_file on the file for each user in the shared list
         for recipient in self.shared_with[filename]:
             self.share_file(filename, recipient)
-        
+
         # update shared_with on dataserver
         shared_with_loc = generate_memloc(
             self.base_key, "shared_with_dict")
@@ -604,6 +645,7 @@ class User:
         enc_shared_with, _ = sym_enc_sign(
             self.base_key, "shared_with_dict", shared_with_bytes)
         dataserver.Set(shared_with_loc, enc_shared_with)
+
 
 def check_owner(self: User, filename: str) -> str:
     """
@@ -621,6 +663,7 @@ def check_owner(self: User, filename: str) -> str:
         return self.shared_files[filename]
     else:
         return self.un
+
 
 def slice_file(data: bytes) -> tuple[bytes, bytes]:
     """
@@ -645,6 +688,7 @@ def slice_file(data: bytes) -> tuple[bytes, bytes]:
     tail = data[size - tail_size:size]
 
     return body, tail
+
 
 def encrypt(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
@@ -677,6 +721,7 @@ def sym_decrypt(base_key: bytes, purpose: str, data: bytes) -> bytes:
     dec_data = crypto.SymmetricDecrypt(enc_key, data)
     return dec_data
 
+
 def sym_hmac(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
     Generates an HMAC for the given data. Must only be called on data that has already been
@@ -692,6 +737,7 @@ def sym_hmac(base_key: bytes, purpose: str, data: bytes) -> bytes:
     sign_key = crypto.HashKDF(base_key, purpose+"_sym_sign")
     hmac = crypto.HMAC(sign_key, data)
     return hmac
+
 
 def sym_enc_sign(base_key: bytes, purpose: str, data: bytes) -> None:
     """
@@ -711,7 +757,8 @@ def sym_enc_sign(base_key: bytes, purpose: str, data: bytes) -> None:
     dataserver.Set(generate_memloc(base_key, purpose+"_hmac_store"), hmac)
     return enc_data, hmac
 
-def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey, 
+
+def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
                   sign_key: crypto.SignatureSignKey, data: bytes) -> tuple[bytes, bytes]:
     """
     Asymmetrically encrypts and then digitally signs some data.
@@ -725,6 +772,7 @@ def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
     enc_data = crypto.AsymmetricEncrypt(enc_key, data)
     sign_data = crypto.SignatureSign(sign_key, enc_data)
     return enc_data, sign_data
+
 
 def sym_verify_dec(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
@@ -755,6 +803,7 @@ def sym_verify_dec(base_key: bytes, purpose: str, data: bytes) -> bytes:
 
     return dec_data
 
+
 def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     """
     Generates a memloc for the given purpose from the given base_key using HashKDF.
@@ -767,6 +816,7 @@ def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     """
     bytestring = crypto.HashKDF(base_key, purpose+"_memloc")
     return memloc.MakeFromBytes(bytestring)
+
 
 def create_user(username: str, password: str) -> User:
     """
@@ -811,6 +861,7 @@ def create_user(username: str, password: str) -> User:
 
     return current_user
 
+
 def authenticate_user(username: str, password: str) -> User:
     """
     The specification for this function is at:
@@ -842,4 +893,3 @@ def authenticate_user(username: str, password: str) -> User:
 # u2.append_file("file1", b"_andevenmore")
 # print(u2.download_file("file1"))
 # print(u1.download_file("file1"))
-

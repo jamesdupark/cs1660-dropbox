@@ -72,6 +72,9 @@ class ClientTests(unittest.TestCase):
 
         self.assertEqual(down_data, b'shared data')
 
+        u1.revoke_file("shared_file", "usr2")
+        self.assertRaises(util.DropboxError, lambda: u2.download_file("shared_file"))
+
     def test_download_error(self):
         """
         Simple test that tests that downloading a file that doesn't exist
