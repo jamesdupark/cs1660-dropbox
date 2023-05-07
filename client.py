@@ -400,6 +400,19 @@ class User:
             file_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_file_key)
         except ValueError:
             raise util.DropboxError("No such file found.")
+
+        # check for duplicate share
+        try:
+            shared_w_loc = generate_memloc(self.base_key, "shared_with_dict")
+            enc_shared_w_bytes = dataserver.Get(shared_w_loc)
+            dec_shared_file_bytes = sym_verify_dec(
+                self.base_key, "shared_with_dict", enc_shared_w_bytes)
+            self.shared_with = util.BytesToObject(dec_shared_file_bytes)
+
+            if recipient in self.shared_with[filename]:
+                return
+        except ValueError:
+            raise util.DropboxError("metadata not found!")
         
         # generate common memloc
         sharing_string = filename+"_sharing_"+self.un+"_"+recipient
@@ -428,27 +441,25 @@ class User:
 
         # add file_key and file_signature to shared_dict_loc
         shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
-        shared_dict[filename] = [enc_file_key, file_signature]
+        shared_dict[filename] = (enc_file_key, file_signature)
         shared_dict_bytes = util.ObjectToBytes(shared_dict)
         dataserver.Set(shared_dict_loc, shared_dict_bytes)
 
         # add recipient to file sharing metadata
-        try:
-            # download metadata
-            meta_loc = generate_memloc(file_key, "metadata")
-            enc_meta = dataserver.Get(meta_loc)
-            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
-            meta = util.BytesToObject(meta_bytes)
 
-            meta["share_list"].append(recipient)
-
-            # upload metadata
-            meta_loc = generate_memloc(file_key, "metadata")
-            enc_meta, _ = sym_enc_sign(
-                file_key, "metadata", util.ObjectToBytes(meta))
-            dataserver.Set(meta_loc, enc_meta)
-        except ValueError:
-            raise util.DropboxError("metadata not found!")
+        # update shared_with
+        if filename in self.shared_with.keys():
+            self.shared_with[filename].append(recipient)
+        else:
+            self.shared_with[filename] = [recipient]
+        
+        # update shared_with on dataserver
+        shared_with_loc = generate_memloc(
+                self.base_key, "shared_with_dict")
+        shared_with_bytes = util.ObjectToBytes(self.shared_with)
+        enc_shared_with, _ = sym_enc_sign(
+            self.base_key, "shared_with_dict", shared_with_bytes)
+        dataserver.Set(shared_with_loc, enc_shared_with)
 
         # share_list_loc = generate_memloc(
         #     file_key, filename+"_sharing"
@@ -477,7 +488,7 @@ class User:
                 sharing_key, filename+"_sharing_"+sender+"_"+self.un
             )
             shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
-            if len(shared_dict) == 0:
+            if len(shared_dict[filename]) == 0:
                 raise util.DropboxError("File has been revoked!")
         except ValueError:
             raise util.DropboxError("No such file shared with "+self.un+".")
