@@ -440,7 +440,7 @@ def check_file_status(self: User, filename: str) -> None:
     """
     # check if it's a shared file
     if filename in self.shared_files:
-        self.receive_file(filename, self.shared_files[filename])
+        # self.receive_file(filename, self.shared_files[filename])
         file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
         file_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_file_key)
         return file_key, False, False
