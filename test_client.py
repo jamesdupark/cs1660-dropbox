@@ -709,11 +709,11 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-# u = create_user("John", "pw")
-# u2 = create_user("Paul", "pw")
+u = create_user("John", "pw")
+u2 = create_user("Paul", "pw")
 
-# u.upload_file("file1", b"some_contents")
-# u.share_file("file1", "Paul")
+u.upload_file("file1", b"some_contents")
+u.share_file("file1", "Paul")
 
-# u2.receive_file("file1", "John")
+u2.receive_file("file1", "John")
 

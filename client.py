@@ -135,9 +135,6 @@ class User:
         """
         # check if file is shared, exists for the User, or doesn't exist
         file_key, is_owner, first_time = check_file_status(self, filename)
-        
-        if is_owner == False:
-             self.receive_file(filename, self.shared_files[filename])
              
         # if the file doesn't exist yet, create a file_key, encrypt/sign it, and store it
         if first_time == True:
@@ -199,8 +196,6 @@ class User:
         file_key, is_owner, first_time = check_file_status(self, filename)
         if first_time == True:
             raise util.DropboxError("No such file found.")
-        if is_owner == False:
-             self.receive_file(filename, self.shared_files[filename])
 
         # get num_blocks
         try:
@@ -245,8 +240,7 @@ class User:
         file_key, is_owner, first_time = check_file_status(self, filename)
         if first_time == True:
             raise util.DropboxError("No such file found.")
-        if is_owner == False:
-             self.receive_file(filename, self.shared_files[filename])
+
         # get num_blocks
         try:
             block_count_loc = generate_memloc(
@@ -443,8 +437,9 @@ def check_file_status(self: User, filename: str) -> None:
     """
     # check if it's a shared file
     if filename in self.shared_files:
-        owner = self.shared_files[filename]
-        file_key = shared_file_key(self, filename, owner)
+        self.receive_file(filename, self.shared_files[filename])
+        file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+        file_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_file_key)
         return file_key, False, False
     # if it's not shared with the User, check if it already exists
     else:
@@ -706,11 +701,11 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-u = create_user("John", "pw")
-u2 = create_user("Paul", "pw")
+# u = create_user("John", "pw")
+# u2 = create_user("Paul", "pw")
 
-u.upload_file("file1", b"some_contents")
-u.share_file("file1", "Paul")
+# u.upload_file("file1", b"some_contents")
+# u.share_file("file1", "Paul")
 
-u2.receive_file("file1", "John")
+# u2.receive_file("file1", "John")
 
