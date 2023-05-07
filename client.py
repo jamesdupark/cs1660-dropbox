@@ -304,130 +304,133 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/share-file.html
         """
-        try:
-            file_key_loc = generate_memloc(
-                self.base_key, filename+"_master_key"
-            )
-            enc_file_key = dataserver.Get(file_key_loc)
-            file_key = sym_verify_dec(
-                self.base_key, filename+"_master_key", enc_file_key
-            )
-        except ValueError:
-            raise util.DropboxError("No such file found.")
+        # try:
+        #     file_key_loc = generate_memloc(
+        #         self.base_key, filename+"_master_key"
+        #     )
+        #     enc_file_key = dataserver.Get(file_key_loc)
+        #     file_key = sym_verify_dec(
+        #         self.base_key, filename+"_master_key", enc_file_key
+        #     )
+        # except ValueError:
+        #     raise util.DropboxError("No such file found.")
         
-        # generate memlocs for common access between User and recipient
-        sharing_string = filename+"_sharing_"+self.un+"_"+recipient
-        sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
-        shared_dict_loc = generate_memloc(
-            sharing_key, filename+"_sharing_"+self.un+"_"+recipient
-        )
+        # # generate memlocs for common access between User and recipient
+        # sharing_string = filename+"_sharing_"+self.un+"_"+recipient
+        # sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+        # shared_dict_loc = generate_memloc(
+        #     sharing_key, filename+"_sharing_"+self.un+"_"+recipient
+        # )
 
-        # get recipient public key
-        try:
-            recipient_pub_key = keyserver.Get(recipient+"_pub_key")
-        except ValueError:
-            raise util.DropboxError("No such recipient found.")
+        # # get recipient public key
+        # try:
+        #     recipient_pub_key = keyserver.Get(recipient+"_pub_key")
+        # except ValueError:
+        #     raise util.DropboxError("No such recipient found.")
         
-        # create assymetric key encryption and signature for file_key
-        enc_file_key, file_signature = asym_enc_sign(
-            recipient_pub_key, self.sign_key, file_key
-        )
+        # # create assymetric key encryption and signature for file_key
+        # enc_file_key, file_signature = asym_enc_sign(
+        #     recipient_pub_key, self.sign_key, file_key
+        # )
 
-        # determine if there is a shared dict already; if not, create
-        try: 
-            dataserver.Get(shared_dict_loc)
-        except ValueError:
-            dict_bytes = util.ObjectToBytes(dict())
-            dataserver.Set(shared_dict_loc, dict_bytes)
+        # # determine if there is a shared dict already; if not, create
+        # try: 
+        #     dataserver.Get(shared_dict_loc)
+        # except ValueError:
+        #     dict_bytes = util.ObjectToBytes(dict())
+        #     dataserver.Set(shared_dict_loc, dict_bytes)
         
-        # add file_key and file_signature to shared_dict_loc
-        shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
-        shared_dict[filename] = [enc_file_key, file_signature]
-        shared_dict_bytes = util.ObjectToBytes(shared_dict)
-        dataserver.Set(shared_dict_loc, shared_dict_bytes)
+        # # add file_key and file_signature to shared_dict_loc
+        # shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
+        # shared_dict[filename] = [enc_file_key, file_signature]
+        # shared_dict_bytes = util.ObjectToBytes(shared_dict)
+        # dataserver.Set(shared_dict_loc, shared_dict_bytes)
 
-        # add recipient to file sharing metadata
-        share_list_loc = generate_memloc(
-            file_key, filename+"_sharing"
-        )
-        share_list = util.BytesToObject(sym_verify_dec(
-                file_key, filename+"_sharing", dataserver.Get(share_list_loc)
-        ))
-        share_list.append(recipient)
-        enc_share_list, _ = sym_enc_sign(
-            file_key, filename+"_sharing", util.ObjectToBytes(share_list)
-        )
-        dataserver.Set(share_list_loc, enc_share_list)
+        # # add recipient to file sharing metadata
+        # share_list_loc = generate_memloc(
+        #     file_key, filename+"_sharing"
+        # )
+        # share_list = util.BytesToObject(sym_verify_dec(
+        #         file_key, filename+"_sharing", dataserver.Get(share_list_loc)
+        # ))
+        # share_list.append(recipient)
+        # enc_share_list, _ = sym_enc_sign(
+        #     file_key, filename+"_sharing", util.ObjectToBytes(share_list)
+        # )
+        # dataserver.Set(share_list_loc, enc_share_list)
+        pass
 
     def receive_file(self, filename: str, sender: str) -> None:
         """
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/receive-file.html
         """
-        # retrieve file key, if exists
-        file_key = shared_file_key(self, filename, sender)
+        # # retrieve file key, if exists
+        # file_key = shared_file_key(self, filename, sender)
 
-        # store this file_key for the User
-        file_key_loc = generate_memloc(
-            self.base_key, filename+"_master_key"
-        )
-        enc_file_key, _ = sym_enc_sign(
-            self.base_key, filename+"_master_key", file_key
-        )
-        dataserver.Set(file_key_loc, enc_file_key)
+        # # store this file_key for the User
+        # file_key_loc = generate_memloc(
+        #     self.base_key, filename+"_master_key"
+        # )
+        # enc_file_key, _ = sym_enc_sign(
+        #     self.base_key, filename+"_master_key", file_key
+        # )
+        # dataserver.Set(file_key_loc, enc_file_key)
 
-        # set User object to reflect new shared file
-        self.shared_files[filename] = sender
+        # # set User object to reflect new shared file
+        # self.shared_files[filename] = sender
+        pass
 
     def revoke_file(self, filename: str, old_recipient: str) -> None:
         """
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/revoke-file.html
         """
-        # ensure that the User is the owner, and they are not revoking themselves
-        file_key, is_owner, first_time = check_file_status(self, filename)
-        if is_owner == False:
-            raise util.DropboxError("Only the owner has file revocation privileges.")
-        if old_recipient == self.un:
-            raise util.DropboxError("Owner cannot revoke themselves.")
+        # # ensure that the User is the owner, and they are not revoking themselves
+        # file_key, is_owner, first_time = check_file_status(self, filename)
+        # if is_owner == False:
+        #     raise util.DropboxError("Only the owner has file revocation privileges.")
+        # if old_recipient == self.un:
+        #     raise util.DropboxError("Owner cannot revoke themselves.")
         
-        # remove old_recipient from shared_list
-        try:
-            file_key_loc = generate_memloc(
-                self.base_key, filename+"_master_key"
-            )
-            enc_file_key = dataserver.Get(file_key_loc)
-            file_key = sym_verify_dec(
-                self.base_key, filename+"_master_key", enc_file_key
-            )
-        except ValueError:
-            raise util.DropboxError("No such file found.")
+        # # remove old_recipient from shared_list
+        # try:
+        #     file_key_loc = generate_memloc(
+        #         self.base_key, filename+"_master_key"
+        #     )
+        #     enc_file_key = dataserver.Get(file_key_loc)
+        #     file_key = sym_verify_dec(
+        #         self.base_key, filename+"_master_key", enc_file_key
+        #     )
+        # except ValueError:
+        #     raise util.DropboxError("No such file found.")
         
-        share_list_loc = generate_memloc(
-            file_key, filename+"_sharing"
-        )
-        share_list = util.BytesToObject(sym_verify_dec(
-                file_key, filename+"_sharing", dataserver.Get(share_list_loc)
-        ))
-        try:
-            share_list.remove(old_recipient)
-        except:
-            util.DropboxError("File is not shared with this recipient.")
-        enc_share_list, _ = sym_enc_sign(
-            file_key, filename+"_sharing", util.ObjectToBytes(share_list)
-        )
-        dataserver.Set(share_list_loc, enc_share_list)
+        # share_list_loc = generate_memloc(
+        #     file_key, filename+"_sharing"
+        # )
+        # share_list = util.BytesToObject(sym_verify_dec(
+        #         file_key, filename+"_sharing", dataserver.Get(share_list_loc)
+        # ))
+        # try:
+        #     share_list.remove(old_recipient)
+        # except:
+        #     util.DropboxError("File is not shared with this recipient.")
+        # enc_share_list, _ = sym_enc_sign(
+        #     file_key, filename+"_sharing", util.ObjectToBytes(share_list)
+        # )
+        # dataserver.Set(share_list_loc, enc_share_list)
 
-        # update the owner with a new file_key
-        new_file_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
-        enc_new_file_key, _ = sym_enc_sign(
-            self.base_key, filename+"_master_key", new_file_key
-        )
-        dataserver.Set(file_key_loc, enc_new_file_key)
+        # # update the owner with a new file_key
+        # new_file_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
+        # enc_new_file_key, _ = sym_enc_sign(
+        #     self.base_key, filename+"_master_key", new_file_key
+        # )
+        # dataserver.Set(file_key_loc, enc_new_file_key)
 
-        # for each user the file is shared with, share again
-        for user in share_list:
-            self.share_file(filename, user)
+        # # for each user the file is shared with, share again
+        # for user in share_list:
+        #     self.share_file(filename, user)
+        pass
 
 def check_file_status(self: User, filename: str) -> None:
     """
@@ -701,11 +704,12 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-# u = create_user("John", "pw")
-# u2 = create_user("Paul", "pw")
+u = create_user("John", "pw")
+u2 = create_user("Paul", "pw")
 
-# u.upload_file("file1", b"some_contents")
-# u.share_file("file1", "Paul")
+u.upload_file("file1", b"some_contents")
+u.share_file("file1", "Paul")
+print(u.download_file("file1"))
 
-# u2.receive_file("file1", "John")
+u2.receive_file("file1", "John")
 
