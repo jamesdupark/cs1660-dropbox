@@ -59,11 +59,19 @@ class User:
             raise TypeError("Incorrect number of arguments for User")
 
         self.shared_files = dict()
-        # create and push empty dict to the dataserver
+        # create and push empty shared file dict to the dataserver
         shared_file_loc = generate_memloc(self.base_key, "shared_file_dict")
         shared_file_bytes = util.ObjectToBytes(self.shared_files)
         enc_shared_files, _ = sym_enc_sign(self.base_key, "shared_file_dict", shared_file_bytes)
         dataserver.Set(shared_file_loc, enc_shared_files)
+
+        self.shared_with = dict()
+        # create and push empty shared with dict to dataserver
+        shared_with_loc = generate_memloc(self.base_key, "shared_with_dict")
+        shared_with_bytes = util.ObjectToBytes(self.shared_with)
+        enc_shared_with, _ = sym_enc_sign(
+            self.base_key, "shared_with_dict", shared_with_bytes)
+        dataserver.Set(shared_with_loc, enc_shared_with)
 
         self.base_key = crypto.PasswordKDF(self.un+pw,
                                            crypto.HashKDF(util.ObjectToBytes(
@@ -138,12 +146,24 @@ class User:
         except ValueError:
             raise util.DropboxError("No shared files dictionary found!")
 
+        # pull shared_with dict from dataserver
+        try:
+            shared_w_loc = generate_memloc(self.base_key, "shared_with_dict")
+            enc_shared_w_bytes = dataserver.Get(shared_w_loc)
+            dec_shared_file_bytes = sym_verify_dec(self.base_key, "shared_with_dict", enc_shared_w_bytes)
+            shared_with = util.BytesToObject(dec_shared_file_bytes)
+        except ValueError:
+            raise util.DropboxError("No shared files dictionary found!")
+
         # keys have been verified, assign to fields
         self.pub_key = pub_key
         self.priv_key = priv_key
         self.verify_key = verify_key
         self.sign_key = sign_key
         self.shared_files = shared_file_dict
+        self.shared_with = shared_with
+
+        # TODO: add shared_with dict of filenames to list[usernames]
 
     def upload_file(self, filename: str, data: bytes) -> None:
         """
@@ -154,16 +174,22 @@ class User:
         # if you're not the owner, the file might've been revoked (and the file_key changed) so 
             # update your file_key
         
-        first_time = False
+        generate_metadata = False
 
         # check if a file_key already exists; if so, use the same one. if not, make new file_key
         try:  
             file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
             file_key = sym_verify_dec(
                 self.base_key, filename+"_master_key", dataserver.Get(file_key_loc)
-            ) 
+            )
+
+            # download metadata
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta = dataserver.Get(meta_loc)
+            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta = util.BytesToObject(meta_bytes)
         except ValueError:
-            first_time = True
+            generate_metadata = True
             # generate file key for this file
             file_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
             # encrypt & store file key
@@ -179,16 +205,30 @@ class User:
             block_count = 1
 
         # if necessary, initialize metadata; then store
-        if first_time == True:
-            share_list = util.ObjectToBytes([self.un])
-            share_list_loc = generate_memloc(file_key, filename+"_sharing")
-            enc_share_list, _ = sym_enc_sign(file_key, filename+"_sharing", share_list)
-            dataserver.Set(share_list_loc, enc_share_list)
+        if generate_metadata == True:
+            # share_list = util.ObjectToBytes([self.un])
+            # share_list_loc = generate_memloc(file_key, filename+"_sharing")
+            # enc_share_list, _ = sym_enc_sign(file_key, filename+"_sharing", share_list)
+            # dataserver.Set(share_list_loc, enc_share_list)
+            # initialize metadata
+            meta = dict()
+            meta["current"] = True
+        elif not meta["current"]:
+            # call recieve_file as necessary or fail b/c you've been revoked --> remove from shared_files
+            self.receive_file(filename, self.shared_files[filename])
+            self.upload_file(filename, data)
+            return
 
-        block_count_loc = generate_memloc(file_key, filename+"_num_blocks")
-        enc_num_blocks, _ = sym_enc_sign(
-            file_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
-        dataserver.Set(block_count_loc, enc_num_blocks)
+        meta["block_count"] = block_count
+
+        meta_loc = generate_memloc(file_key, "metadata")
+        enc_meta, _ = sym_enc_sign(
+            file_key, "metadata", util.ObjectToBytes(meta))
+        dataserver.Set(meta_loc, enc_meta)
+        # block_count_loc = generate_memloc(file_key, filename+"_num_blocks")
+        # enc_num_blocks, _ = sym_enc_sign(
+        #     file_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
+        # dataserver.Set(block_count_loc, enc_num_blocks)
 
         # file slice memlocs
         body_loc = generate_memloc(file_key, f'{filename}_block_{0}')
@@ -223,15 +263,21 @@ class User:
         except ValueError:
             raise util.DropboxError("No such file found.")
         
-        # get num_blocks
+        # get metadata
         try:
-            block_count_loc = generate_memloc(
-                file_key, filename+"_num_blocks")
-            enc_block_count = dataserver.Get(block_count_loc)
-            block_count = int.from_bytes(sym_verify_dec(
-                file_key, filename+"_num_blocks", enc_block_count), "little")
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta = dataserver.Get(meta_loc)
+            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta = util.BytesToObject(meta_bytes)
+
+            block_count = meta["block_count"]
         except ValueError:
             raise util.DropboxError("File metadata corrupted.")
+
+        if not meta["current"]:
+            # call recieve_file as necessary or fail b/c you've been revoked --> remove from shared_files
+            self.receive_file(filename, self.shared_files[filename])
+            return self.download_file(filename)
 
         # iterate through all blocks and download them
         doc = bytes()
@@ -274,16 +320,25 @@ class User:
         except ValueError:
             raise util.DropboxError("No such file found.")
 
-        # get num_blocks
+        # get metadata
         try:
-            block_count_loc = generate_memloc(
-                file_key, filename+"_num_blocks")
-            enc_block_count = dataserver.Get(block_count_loc)
-            block_count = int.from_bytes(sym_verify_dec(
-                file_key, filename+"_num_blocks", enc_block_count), "little")
+            # download metadata
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta = dataserver.Get(meta_loc)
+            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta = util.BytesToObject(meta_bytes)
+
+            block_count = meta["block_count"]
         except ValueError:
             # failed dataserver get - no filename found (likely)
             raise util.DropboxError("No such file found")
+
+        # if current = False, update
+        if not meta["current"]:
+            # call recieve_file as necessary or fail b/c you've been revoked --> remove from shared_files
+            self.receive_file(filename, self.shared_files[filename])
+            self.append_file(filename, data)
+            return
 
         # get last block
         try:
@@ -321,11 +376,17 @@ class User:
                 file_key, f'{filename}_block_{block_count}', tail)
             dataserver.Set(tail_loc, enc_tail)
 
-            # increment number of blocks and re-store
+            # increment number of blocks and re-store metadata
             block_count += 1
-            enc_num_blocks, _ = sym_enc_sign(
-                file_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
-            dataserver.Set(block_count_loc, enc_num_blocks)
+            meta["block_count"] = block_count
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta, _ = sym_enc_sign(
+                file_key, "metadata", util.ObjectToBytes(meta))
+            dataserver.Set(meta_loc, enc_meta)
+
+            # enc_num_blocks, _ = sym_enc_sign(
+            #     file_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
+            # dataserver.Set(block_count_loc, enc_num_blocks)
 
     def share_file(self, filename: str, recipient: str) -> None:
         """
@@ -372,19 +433,36 @@ class User:
         dataserver.Set(shared_dict_loc, shared_dict_bytes)
 
         # add recipient to file sharing metadata
-        share_list_loc = generate_memloc(
-            file_key, filename+"_sharing"
-        )
-        share_list = util.BytesToObject(
-            sym_verify_dec(
-                file_key, filename+"_sharing", dataserver.Get(share_list_loc)
-            )
-        )
-        share_list.append(recipient)
-        enc_share_list, _ = sym_enc_sign(
-            file_key, filename+"_sharing", util.ObjectToBytes(share_list)
-        )
-        dataserver.Set(share_list_loc, enc_share_list)
+        try:
+            # download metadata
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta = dataserver.Get(meta_loc)
+            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta = util.BytesToObject(meta_bytes)
+
+            meta["share_list"].append(recipient)
+
+            # upload metadata
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta, _ = sym_enc_sign(
+                file_key, "metadata", util.ObjectToBytes(meta))
+            dataserver.Set(meta_loc, enc_meta)
+        except ValueError:
+            raise util.DropboxError("metadata not found!")
+
+        # share_list_loc = generate_memloc(
+        #     file_key, filename+"_sharing"
+        # )
+        # share_list = util.BytesToObject(
+        #     sym_verify_dec(
+        #         file_key, filename+"_sharing", dataserver.Get(share_list_loc)
+        #     )
+        # )
+        # share_list.append(recipient)
+        # enc_share_list, _ = sym_enc_sign(
+        #     file_key, filename+"_sharing", util.ObjectToBytes(share_list)
+        # )
+        # dataserver.Set(share_list_loc, enc_share_list)
 
     def receive_file(self, filename: str, sender: str) -> None:
         """
@@ -399,6 +477,8 @@ class User:
                 sharing_key, filename+"_sharing_"+sender+"_"+self.un
             )
             shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
+            if len(shared_dict) == 0:
+                raise util.DropboxError("File has been revoked!")
         except ValueError:
             raise util.DropboxError("No such file shared with "+self.un+".")
 
@@ -426,6 +506,10 @@ class User:
         self.shared_files[filename] = sender
 
         # push shared_file dict to dataserver
+        shared_file_bytes = util.ObjectToBytes(self.shared_files)
+        enc_shared_files, _ = sym_enc_sign(
+            self.base_key, "shared_file_dict", shared_file_bytes)
+        dataserver.Set(shared_file_loc, enc_shared_files)
 
     def revoke_file(self, filename: str, old_recipient: str) -> None:
         """
@@ -434,6 +518,21 @@ class User:
         """
         # TODO: Implement
         raise util.DropboxError("Not Implemented")
+
+        # go to old metadata and set "current" to false and remove the user from the share list
+
+        # create a new base key and store it at our memloc for the file's master key
+
+        # create new metadata for this copy of the file using the new master key
+
+        # remove the key from the user's pair share dict
+
+        # call upload_flie on the key
+        # call share_file on the file for each user in the shared list
+
+        # when a revoked user tries to access the file, they can confirm that "current" is false and that they are not in the share list
+        # when a non-revoke user tries to access the file, they can confirm that "current" is false and they are sitll in the share list
+        # and call recieve_file on the filename again in order to update their key for the file.
 
 def check_owner(self: User, filename: str) -> str:
     """
