@@ -54,9 +54,15 @@ class User:
             self.un, pw = args[0], args[1]
         elif len(args) == 6:
             self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key = \
-                args[0], args[1], args[2], args[3], args[4], args[5], args[6]
+                args[0], args[1], args[2], args[3], args[4], args[5]
         else:
             raise TypeError("Incorrect number of arguments for User")
+
+        # generate base key
+        self.base_key = crypto.PasswordKDF(self.un+pw,
+                                           crypto.HashKDF(util.ObjectToBytes(
+                                               self.un+pw), "base_key_salt"),
+                                           16)
 
         self.shared_files = dict()
         # create and push empty shared file dict to the dataserver
@@ -72,11 +78,6 @@ class User:
         enc_shared_with, _ = sym_enc_sign(
             self.base_key, "shared_with_dict", shared_with_bytes)
         dataserver.Set(shared_with_loc, enc_shared_with)
-
-        self.base_key = crypto.PasswordKDF(self.un+pw,
-                                           crypto.HashKDF(util.ObjectToBytes(
-                                               self.un+pw), "base_key_salt"),
-                                           16)
 
     def authenticate(self, username: str, password: str) -> None:
         """
@@ -409,10 +410,10 @@ class User:
                 self.base_key, "shared_with_dict", enc_shared_w_bytes)
             self.shared_with = util.BytesToObject(dec_shared_file_bytes)
 
-            if recipient in self.shared_with[filename]:
+            if filename in self.shared_with and recipient in self.shared_with[filename]:
                 return
         except ValueError:
-            raise util.DropboxError("metadata not found!")
+            raise util.DropboxError("shared_with dictionary not found!")
         
         # generate common memloc
         sharing_string = filename+"_sharing_"+self.un+"_"+recipient
@@ -441,7 +442,7 @@ class User:
 
         # add file_key and file_signature to shared_dict_loc
         shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
-        shared_dict[filename] = (enc_file_key, file_signature)
+        shared_dict[filename] = [enc_file_key, file_signature]
         shared_dict_bytes = util.ObjectToBytes(shared_dict)
         dataserver.Set(shared_dict_loc, shared_dict_bytes)
 
@@ -517,6 +518,7 @@ class User:
         self.shared_files[filename] = sender
 
         # push shared_file dict to dataserver
+        shared_file_loc = generate_memloc(self.base_key, "shared_file_dict")
         shared_file_bytes = util.ObjectToBytes(self.shared_files)
         enc_shared_files, _ = sym_enc_sign(
             self.base_key, "shared_file_dict", shared_file_bytes)
@@ -530,20 +532,81 @@ class User:
         # TODO: Implement
         raise util.DropboxError("Not Implemented")
 
-        # go to old metadata and set "current" to false and remove the user from the share list
+        ## go to old metadata and set "current" to false and remove the user from the share list
+        # get flie key
+        try:
+            file_key_loc = generate_memloc(
+                self.base_key, filename+"_master_key")
+            enc_file_key = dataserver.Get(file_key_loc)
+            file_key = sym_verify_dec(
+                self.base_key, filename+"_master_key", enc_file_key)
+        except ValueError:
+            raise util.DropboxError("No such file found.")
+
+        # download old file
+        data = self.download_file(filename)
+
+        # modify "current" to be False on the old metadata
+        try:
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta = dataserver.Get(meta_loc)
+            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta = util.BytesToObject(meta_bytes)
+
+            meta["current"] = False
+
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta, _ = sym_enc_sign(
+                file_key, "metadata", util.ObjectToBytes(meta))
+            dataserver.Set(meta_loc, enc_meta)
+        except ValueError:
+            raise util.DropboxError("File metadata corrupted.")
 
         # create a new base key and store it at our memloc for the file's master key
+        new_file_key = crypto.HashKDF(
+            self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
+        # encrypt & store file key
+        enc_file_key, _ = sym_enc_sign(
+            self.base_key, filename+"_master_key", new_file_key)
+        dataserver.Set(file_key_loc, enc_file_key)
 
-        # create new metadata for this copy of the file using the new master key
+        # initialize metadata; then store
+        meta = dict()
+        meta["current"] = True
+        meta["block_count"] = 0
+        meta_loc = generate_memloc(new_file_key, "metadata")
+        enc_meta, _ = sym_enc_sign(
+            new_file_key, "metadata", util.ObjectToBytes(meta))
+        dataserver.Set(meta_loc, enc_meta)
 
-        # remove the key from the user's pair share dict
+        # remove the key from the user's shared_with dict
+        # pull shared_with
+        try:
+            shared_w_loc = generate_memloc(self.base_key, "shared_with_dict")
+            enc_shared_w_bytes = dataserver.Get(shared_w_loc)
+            dec_shared_file_bytes = sym_verify_dec(
+                self.base_key, "shared_with_dict", enc_shared_w_bytes)
+            self.shared_with = util.BytesToObject(dec_shared_file_bytes)
+        except ValueError:
+            raise util.DropboxError("shared_with dictionary not found!")
+
+        # remove from shared_with
+        self.shared_with[filename].remove(old_recipient)
 
         # call upload_flie on the key
-        # call share_file on the file for each user in the shared list
+        self.upload_file(filename, data)
 
-        # when a revoked user tries to access the file, they can confirm that "current" is false and that they are not in the share list
-        # when a non-revoke user tries to access the file, they can confirm that "current" is false and they are sitll in the share list
-        # and call recieve_file on the filename again in order to update their key for the file.
+        # call share_file on the file for each user in the shared list
+        for recipient in self.shared_with[filename]:
+            self.share_file(filename, recipient)
+        
+        # update shared_with on dataserver
+        shared_with_loc = generate_memloc(
+            self.base_key, "shared_with_dict")
+        shared_with_bytes = util.ObjectToBytes(self.shared_with)
+        enc_shared_with, _ = sym_enc_sign(
+            self.base_key, "shared_with_dict", shared_with_bytes)
+        dataserver.Set(shared_with_loc, enc_shared_with)
 
 def check_owner(self: User, filename: str) -> str:
     """
