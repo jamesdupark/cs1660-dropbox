@@ -52,11 +52,18 @@ class User:
         """
         if len(args) == 2:
             self.un, pw = args[0], args[1]
-        elif len(args) == 7:
-            self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key, self.shared_files = \
+        elif len(args) == 6:
+            self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key = \
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6]
         else:
             raise TypeError("Incorrect number of arguments for User")
+
+        self.shared_files = dict()
+        # create and push empty dict to the dataserver
+        shared_file_loc = generate_memloc(self.base_key, "shared_file_dict")
+        shared_file_bytes = util.ObjectToBytes(self.shared_files)
+        enc_shared_files, _ = sym_enc_sign(self.base_key, "shared_file_dict", shared_file_bytes)
+        dataserver.Set(shared_file_loc, enc_shared_files)
 
         self.base_key = crypto.PasswordKDF(self.un+pw,
                                            crypto.HashKDF(util.ObjectToBytes(
@@ -122,11 +129,21 @@ class User:
             raise util.DropboxError(
                 "Authentication Error - Check Your Username/Password!")
 
+        # pull shared files from dataserver
+        try:
+            shared_file_loc = generate_memloc(self.base_key, "shared_file_dict")
+            enc_shared_file_bytes = dataserver.Get(shared_file_loc)
+            dec_shared_file_bytes = sym_verify_dec(self.base_key, "shared_file_dict", enc_shared_file_bytes)
+            shared_file_dict = util.BytesToObject(dec_shared_file_bytes)
+        except ValueError:
+            raise util.DropboxError("No shared files dictionary found!")
+
         # keys have been verified, assign to fields
         self.pub_key = pub_key
         self.priv_key = priv_key
         self.verify_key = verify_key
         self.sign_key = sign_key
+        self.shared_files = shared_file_dict
 
     def upload_file(self, filename: str, data: bytes) -> None:
         """
@@ -408,6 +425,8 @@ class User:
         # set User object to reflect new file
         self.shared_files[filename] = sender
 
+        # push shared_file dict to dataserver
+
     def revoke_file(self, filename: str, old_recipient: str) -> None:
         """
         The specification for this function is at:
@@ -587,11 +606,10 @@ def create_user(username: str, password: str) -> User:
     # Initialize necessary keys
     pub_key, priv_key = crypto.AsymmetricKeyGen()
     verify_key, sign_key = crypto.SignatureKeyGen()
-    shared_files = dict()
 
     # Initialize User object
     current_user = User(username, password, pub_key,
-                        priv_key, verify_key, sign_key, shared_files)
+                        priv_key, verify_key, sign_key)
 
     # Check if username is already taken, or is empty string
     if username == "":
