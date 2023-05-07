@@ -663,10 +663,10 @@ def authenticate_user(username: str, password: str) -> User:
 # u.upload_file("emptyfile", b'')
 # # authenticate_user("bob", "sw")
 
-u = create_user("John", "pw")
-u2 = create_user("Paul", "pw")
-u.upload_file("filename", b"file_contents")
-u.share_file("filename", "Paul")
-u2.receive_file("filename", "John")
-u2.upload_file("filename", b"file_other")
-u
+# u = create_user("John", "pw")
+# u2 = create_user("Paul", "pw")
+# u.upload_file("filename", b"file_contents")
+# u.share_file("filename", "Paul")
+# u2.receive_file("filename", "John")
+# u2.upload_file("filename", b"file_other")
+# u
