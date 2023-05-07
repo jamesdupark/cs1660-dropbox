@@ -40,7 +40,6 @@ class User:
             - priv_key: crypto.AsymmetricDecryptKey - private decryption key of the User
             - verify_key: crypto.SignatureVerifyKey - public verification key of the User
             - sign_key: crypto.SignatureSignKey - private signature key of the User
-            - shared_files: dict - stores the filenames as keys and sender as values for files shared with the User
         Fields:
             - un: str - username of the User
             - base_key - base key of the User, used to generate other symmetric keys and memlocs
@@ -48,13 +47,12 @@ class User:
             - priv_key: crypto.AsymmetricDecryptKey - private decryption key of the User
             - verify_key: crypto.SignatureVerifyKey - public verification key of the User
             - sign_key: crypto.SignatureSignKey - private signature key of the User
-            - shared_files: dict - stores the filenames as keys and sender as values for files shared with the User
         """
         if len(args) == 2:
             self.un, pw = args[0], args[1]
-        elif len(args) == 7:
-            self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key, self.shared_files = \
-                args[0], args[1], args[2], args[3], args[4], args[5], args[6]
+        elif len(args) == 6:
+            self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key, = \
+                args[0], args[1], args[2], args[3], args[4], args[5],
         else:
             raise TypeError("Incorrect number of arguments for User")
 
@@ -133,9 +131,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
-        # update the file base key if it is a shared file
-        if filename in self.shared_files:
-            update_key(self, filename)
 
         # generate base key for this file
         base_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
@@ -185,10 +180,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/download-file.html
         """
-        # update the file base key if it is a shared file
-        if filename in self.shared_files:
-            update_key(self, filename)
-
         # get base_key
         try:
             base_key_loc = generate_memloc(
@@ -234,10 +225,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/append-file.html
         """
-        # update the file base key if it is a shared file
-        if filename in self.shared_files:
-            update_key(self, filename)
-            
         # get base_key
         try:
             base_key_loc = generate_memloc(
@@ -389,9 +376,6 @@ class User:
         # get the file base key
         file_key = crypto.AsymmetricDecrypt(self.priv_key, enc_file_key)
 
-        # add this filename and sender to shared_files
-        self.shared_files[filename] = sender
-
         # store this file base key for this user
         base_key_loc = generate_memloc(
                 self.base_key, filename+"_master_key")
@@ -403,6 +387,7 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/revoke-file.html
         """
+        
         pass
 
 
@@ -556,20 +541,6 @@ def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
     sign_data = crypto.SignatureSign(sign_key, enc_data)
     return enc_data, sign_data
 
-def update_key(self: User, filename: str) -> None:
-    """
-    Given a User object and a filename, and if the file is owned by another User,
-    updates the base_key for the file.
-
-    Parameters:
-    self - a User object
-    filename - a string
-    """
-    sender = self.shared_files[filename]
-    self.receive_file(filename, sender)
-    return
-
-
 def create_user(username: str, password: str) -> User:
     """
     The specification for this function is at:
@@ -580,9 +551,8 @@ def create_user(username: str, password: str) -> User:
     verify_key, sign_key = crypto.SignatureKeyGen()
 
     # Initialize User object
-    shared_files = dict()
     current_user = User(username, password, pub_key,
-                        priv_key, verify_key, sign_key, shared_files)
+                        priv_key, verify_key, sign_key)
 
     # Check if username is already taken, or is empty string
     if username == "":
