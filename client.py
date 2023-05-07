@@ -135,6 +135,7 @@ class User:
         """
         # check if file is shared, exists for the User, or doesn't exist
         file_key, is_owner, first_time = check_file_status(self, filename)
+        
         if is_owner == False:
              self.receive_file(filename, self.shared_files[filename])
              
@@ -452,7 +453,7 @@ def check_file_status(self: User, filename: str) -> None:
             enc_file_key = dataserver.Get(file_key_loc)
         # if the file doesn't exist, return
         except ValueError:
-            return None, False, True
+            return None, True, True
     
     # if the file exists and it's owned by the User
     file_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_file_key)
@@ -705,11 +706,11 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-# u = create_user("John", "pw")
-# u2 = create_user("Paul", "pw")
+u = create_user("John", "pw")
+u2 = create_user("Paul", "pw")
 
-# u.upload_file("file1", b"some_contents")
-# u.share_file("file1", "Paul")
+u.upload_file("file1", b"some_contents")
+u.share_file("file1", "Paul")
 
-# u2.receive_file("file1", "John")
+u2.receive_file("file1", "John")
 
