@@ -529,9 +529,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/sharing/revoke-file.html
         """
-        # TODO: Implement
-        raise util.DropboxError("Not Implemented")
-
         ## go to old metadata and set "current" to false and remove the user from the share list
         # get flie key
         try:
