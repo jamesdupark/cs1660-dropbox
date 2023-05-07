@@ -142,7 +142,9 @@ class User:
         # check if a file_key already exists; if so, use the same one. if not, make new file_key
         try:  
             file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
-            file_key = dataserver.Get(file_key_loc)
+            file_key = sym_verify_dec(
+                self.base_key, filename+"_master_key", dataserver.Get(file_key_loc)
+            ) 
         except ValueError:
             first_time = True
             # generate file key for this file
@@ -165,7 +167,7 @@ class User:
             share_list_loc = generate_memloc(file_key, filename+"_sharing")
             enc_share_list, _ = sym_enc_sign(file_key, filename+"_sharing", share_list)
             dataserver.Set(share_list_loc, enc_share_list)
-        
+
         block_count_loc = generate_memloc(file_key, filename+"_num_blocks")
         enc_num_blocks, _ = sym_enc_sign(
             file_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
@@ -418,6 +420,12 @@ class User:
 def check_owner(self: User, filename: str) -> str:
     """
     Based on a User object and a filename, determines who the owner User is.
+
+    Parameters:
+        - self: a User object
+        - filename: a filename string
+    Returns:
+        - a string representing the username of the owner User
     """
     if len(self.shared_files) == 0:
         return self.un
@@ -451,7 +459,6 @@ def slice_file(data: bytes) -> tuple[bytes, bytes]:
 
     return body, tail
 
-
 def encrypt(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
     Derives a new key from the base_key to encrypt the given data
@@ -483,7 +490,6 @@ def sym_decrypt(base_key: bytes, purpose: str, data: bytes) -> bytes:
     dec_data = crypto.SymmetricDecrypt(enc_key, data)
     return dec_data
 
-
 def sym_hmac(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
     Generates an HMAC for the given data. Must only be called on data that has already been
@@ -499,7 +505,6 @@ def sym_hmac(base_key: bytes, purpose: str, data: bytes) -> bytes:
     sign_key = crypto.HashKDF(base_key, purpose+"_sym_sign")
     hmac = crypto.HMAC(sign_key, data)
     return hmac
-
 
 def sym_enc_sign(base_key: bytes, purpose: str, data: bytes) -> None:
     """
@@ -520,18 +525,19 @@ def sym_enc_sign(base_key: bytes, purpose: str, data: bytes) -> None:
     return enc_data, hmac
 
 def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey, 
-                  sign_key: crypto.SignatureSignKey, data: bytes) -> None:
+                  sign_key: crypto.SignatureSignKey, data: bytes) -> tuple[bytes, bytes]:
     """
     Asymmetrically encrypts and then digitally signs some data.
     Parameters:
         - enc_key: the assymetric encryption key
         - sign_key: the digital signature key
         - data: the data to encrypt and sign
+    Returns;
+        - a tuple containing the data encrypted by enc_key, and a signature using the sign_key
     """
     enc_data = crypto.AsymmetricEncrypt(enc_key, data)
     sign_data = crypto.SignatureSign(sign_key, enc_data)
     return enc_data, sign_data
-
 
 def sym_verify_dec(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
@@ -562,7 +568,6 @@ def sym_verify_dec(base_key: bytes, purpose: str, data: bytes) -> bytes:
 
     return dec_data
 
-
 def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     """
     Generates a memloc for the given purpose from the given base_key using HashKDF.
@@ -575,7 +580,6 @@ def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     """
     bytestring = crypto.HashKDF(base_key, purpose+"_memloc")
     return memloc.MakeFromBytes(bytestring)
-
 
 def create_user(username: str, password: str) -> User:
     """
@@ -621,7 +625,6 @@ def create_user(username: str, password: str) -> User:
 
     return current_user
 
-
 def authenticate_user(username: str, password: str) -> User:
     """
     The specification for this function is at:
@@ -637,8 +640,20 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-u = create_user("bob", "pw")
-authenticate_user("bob", "pw")
-u.upload_file("filename", b'hello')
-u.upload_file("filename2", b'hello my name is bob this is a long file.')
-u.upload_file("emptyfile", b'')
+# u1 = create_user("Paul", "pw")
+# u2 = create_user("John", "pw")
+
+# u1.upload_file("file1", b"content")
+# u1.append_file("file1", b"_morecontent")
+# # print(u1.download_file("file1"))
+
+# u1.share_file("file1", "John")
+# u2.receive_file("file1", "Paul")
+# print(u2.download_file("file1"))
+# u2.upload_file("file1", b"different_content")
+# print(u2.download_file("file1"))
+# print(u1.download_file("file1"))
+# u2.append_file("file1", b"_andevenmore")
+# print(u2.download_file("file1"))
+# print(u1.download_file("file1"))
+
