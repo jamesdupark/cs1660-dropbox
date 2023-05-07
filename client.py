@@ -343,14 +343,14 @@ class User:
         try: 
             dataserver.Get(shared_dict_loc)
         except ValueError:
-            dict_bytes = util.ObjectToBytes(dict())
-            dataserver.Set(shared_dict_loc, dict_bytes)
+            shared_dict_bytes = util.ObjectToBytes(dict())
+            dataserver.Set(shared_dict_loc, shared_dict_bytes)
 
         # add file_key and file_signature to shared_dict_loc
         shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
         shared_dict[filename] = [enc_file_key, file_signature]
         shared_dict_bytes = util.ObjectToBytes(shared_dict)
-        dataserver.Set(shared_dict_loc, shared_dict_bytes)  
+        dataserver.Set(shared_dict_loc, shared_dict_bytes)
 
         # add recipient to file sharing metadata
         share_list_loc = generate_memloc(
@@ -379,10 +379,10 @@ class User:
             shared_dict_loc = generate_memloc(
                 sharing_key, filename+"_sharing_"+sender+"_"+self.un
             )
-            shared_dict = dataserver.Get(shared_dict_loc)
+            shared_dict = util.BytesToObject(dataserver.Get(shared_dict_loc))
         except ValueError:
             raise util.DropboxError("No such file shared with "+self.un+".")
-        
+
         # retrieve file_key and file_signature
         enc_file_key = shared_dict[filename][0]
         file_signature = shared_dict[filename][1]
@@ -397,8 +397,14 @@ class User:
         file_key = crypto.AsymmetricDecrypt(self.priv_key, enc_file_key)
 
         # store this file key for the User
-        
+        file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+        enc_file_key, _ = sym_enc_sign(
+            self.base_key, filename+"_master_key", file_key
+        )
+        dataserver.Set(file_key_loc, enc_file_key)
 
+        # set User object to reflect new file
+        self.shared_files[filename] = sender
 
 
     def revoke_file(self, filename: str, old_recipient: str) -> None:
@@ -636,4 +642,3 @@ authenticate_user("bob", "pw")
 u.upload_file("filename", b'hello')
 u.upload_file("filename2", b'hello my name is bob this is a long file.')
 u.upload_file("emptyfile", b'')
-# authenticate_user("bob", "sw")
