@@ -133,7 +133,7 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
-        is_owner = check_owner(self, filename)
+        # is_owner = check_owner(self, filename)
         # if you're not the owner, the file might've been revoked (and the file_key changed) so 
             # update your file_key
         
@@ -191,7 +191,7 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/download-file.html
         """
-        is_owner = check_owner(self, filename)
+        # is_owner = check_owner(self, filename)
         # if you're not the owner, the file might've been revoked (and the file_key changed) so 
             # update your file_key
 
@@ -241,7 +241,7 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/append-file.html
         """
-        is_owner = check_owner(self, filename)
+        # is_owner = check_owner(self, filename)
         # if you're not the owner, the file might've been revoked (and the file_key changed) so 
             # update your file_key
 
@@ -408,7 +408,6 @@ class User:
         # set User object to reflect new file
         self.shared_files[filename] = sender
 
-
     def revoke_file(self, filename: str, old_recipient: str) -> None:
         """
         The specification for this function is at:
@@ -433,7 +432,6 @@ def check_owner(self: User, filename: str) -> str:
         return self.shared_files[filename]
     else:
         return self.un
-
 
 def slice_file(data: bytes) -> tuple[bytes, bytes]:
     """
