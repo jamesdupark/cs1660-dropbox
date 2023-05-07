@@ -436,6 +436,23 @@ class User:
         shared_dict[filename] = [enc_new_file_key, new_file_signature]
         shared_dict_bytes = util.ObjectToBytes(shared_dict)
         dataserver.Set(shared_dict_loc, shared_dict_bytes)
+        
+
+    # file_elements = shared_dict[filename]
+    # enc_file_key = file_elements[0]
+    # file_signature = file_elements[1]
+
+    # # verify integrity
+    # try:
+    #     crypto.SignatureVerify(
+    #         keyserver.Get(sender+"_verify_key"),
+    #         enc_file_key,
+    #         file_signature
+    #     )
+    # except:
+    #     raise util.DropboxError("File corrupted.")
+    
+
     
 
 def check_file_status(self: User, filename: str) -> None:
@@ -709,11 +726,11 @@ def authenticate_user(username: str, password: str) -> User:
     return current_user
 
 
-# u = create_user("John", "pw")
-# u2 = create_user("Paul", "pw")
+u = create_user("John", "pw")
+u2 = create_user("Paul", "pw")
 
-# u.upload_file("file1", b"some_contents")
-# u.share_file("file1", "Paul")
+u.upload_file("file1", b"some_contents")
+u.share_file("file1", "Paul")
 
-# u2.receive_file("file1", "John")
+u2.receive_file("file1", "John")
 

@@ -40,6 +40,7 @@ class User:
             - priv_key: crypto.AsymmetricDecryptKey - private decryption key of the User
             - verify_key: crypto.SignatureVerifyKey - public verification key of the User
             - sign_key: crypto.SignatureSignKey - private signature key of the User
+            - shared_files: dictionary - shared filenames as keys, file owner as value
         Fields:
             - un: str - username of the User
             - base_key - base key of the User, used to generate other symmetric keys and memlocs
@@ -47,12 +48,13 @@ class User:
             - priv_key: crypto.AsymmetricDecryptKey - private decryption key of the User
             - verify_key: crypto.SignatureVerifyKey - public verification key of the User
             - sign_key: crypto.SignatureSignKey - private signature key of the User
+            - shared_files: dictionary - shared filenames as keys, file owner as value
         """
         if len(args) == 2:
             self.un, pw = args[0], args[1]
-        elif len(args) == 6:
-            self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key, = \
-                args[0], args[1], args[2], args[3], args[4], args[5],
+        elif len(args) == 7:
+            self.un, pw, self.pub_key, self.priv_key, self.verify_key, self.sign_key, self.shared_files = \
+                args[0], args[1], args[2], args[3], args[4], args[5], args[6]
         else:
             raise TypeError("Incorrect number of arguments for User")
 
@@ -131,14 +133,43 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
+        # if it's a shared file, retrieve the base_key; if it's yours, 
+        if filename in self.shared_files.keys():
+            sender = self.shared_files[filename]
+            sharing_string = filename+"sharing_str_"+sender+"_"+self.un
+            sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+            sharing_memloc = generate_memloc(
+                sharing_key, filename+"_sharing_loc_"+sender+"_"+self.un
+            )
+            sharing_dict_bytes = dataserver.Get(sharing_memloc)
+            sharing_dict = util.BytesToObject(sharing_dict_bytes)
+            file_elements = sharing_dict[filename]
+            enc_file_key = file_elements[0]
+            file_signature = file_elements[1]
 
-        # generate base key for this file
-        base_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
-        base_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+            try:
+                crypto.SignatureVerify(
+                    keyserver.Get(sender+"_verify_key"),
+                    enc_file_key,
+                    file_signature
+                )
+            except:
+                raise util.DropboxError("File integrity damaged.")
+            
+            # get the file base key
+            base_key = crypto.AsymmetricDecrypt(self.priv_key, enc_file_key)
 
-        # encrypt/store base key
-        enc_base_key, _ = sym_enc_sign(self.base_key, filename+"_master_key", base_key)
-        dataserver.Set(base_key_loc, enc_base_key)
+        else:
+            try:
+                dataserver.Get(generate_memloc(self.base_key, filename+"_master_key"))
+            except:
+                # generate base key for this file
+                base_key = crypto.HashKDF(self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
+                base_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+
+                # encrypt/store base key
+                enc_base_key, _ = sym_enc_sign(self.base_key, filename+"_master_key", base_key)
+                dataserver.Set(base_key_loc, enc_base_key)
         
         # slice file
         body, tail = slice_file(data)
@@ -149,7 +180,7 @@ class User:
             block_count = 1
 
         # initialize metadata: sharing list, block count
-        share_list = util.ObjectToBytes([])
+        share_list = util.ObjectToBytes([self.un])
         block_count_loc = generate_memloc(
             base_key, filename+"_num_blocks")
         share_list_loc = generate_memloc(base_key, filename+"_sharing")
@@ -333,12 +364,27 @@ class User:
             dict_bytes = util.ObjectToBytes(dict)
             dataserver.Set(sharing_memloc, dict_bytes)
 
+        # add the encrypted key and the signature to dataserver
         sharing_dict_bytes = dataserver.Get(sharing_memloc)
         sharing_dict = util.BytesToObject(sharing_dict_bytes)
         sharing_dict[filename] = [enc_file_base_key, sign_file_base_key]
         sharing_dict_bytes = util.ObjectToBytes(sharing_dict)
         
         dataserver.Set(sharing_memloc, sharing_dict_bytes)
+
+        # add the recipient to the file
+        share_list_loc = generate_memloc(base_key, filename+"_sharing")
+        share_list_bytes = sym_verify_dec(
+            base_key, filename+"_sharing", dataserver.Get(share_list_loc)
+            )
+        share_list = util.BytesToObject(share_list_bytes)
+        share_list.append(recipient)
+
+        share_list_bytes = util.ObjectToBytes(share_list)
+        share_list, _ = sym_enc_sign(
+            base_key, filename+"_sharing", share_list_bytes)
+        dataserver.Set(share_list_loc, share_list)
+
 
     def receive_file(self, filename: str, sender: str) -> None:
         """
@@ -381,6 +427,10 @@ class User:
                 self.base_key, filename+"_master_key")
         enc_base_key, _ = sym_enc_sign(self.base_key, filename+"_master_key", file_key)
         dataserver.Set(base_key_loc, enc_base_key)
+
+        # add to shared_files in User object
+        self.shared_files[filename] = sender
+
 
     def revoke_file(self, filename: str, old_recipient: str) -> None:
         """
@@ -541,6 +591,11 @@ def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
     sign_data = crypto.SignatureSign(sign_key, enc_data)
     return enc_data, sign_data
 
+def update_key(self: User, filename: str) -> None:
+    """
+    Given a User object and a filename, if the 
+    """
+
 def create_user(username: str, password: str) -> User:
     """
     The specification for this function is at:
@@ -549,10 +604,11 @@ def create_user(username: str, password: str) -> User:
     # Initialize necessary keys
     pub_key, priv_key = crypto.AsymmetricKeyGen()
     verify_key, sign_key = crypto.SignatureKeyGen()
+    shared_files = dict()
 
     # Initialize User object
     current_user = User(username, password, pub_key,
-                        priv_key, verify_key, sign_key)
+                        priv_key, verify_key, sign_key, shared_files)
 
     # Check if username is already taken, or is empty string
     if username == "":
@@ -612,3 +668,5 @@ u2 = create_user("Paul", "pw")
 u.upload_file("filename", b"file_contents")
 u.share_file("filename", "Paul")
 u2.receive_file("filename", "John")
+u2.upload_file("filename", b"file_other")
+u
