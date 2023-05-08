@@ -168,17 +168,11 @@ class User:
         self.shared_files = shared_file_dict
         self.shared_with = shared_with
 
-        # TODO: add shared_with dict of filenames to list[usernames]
-
     def upload_file(self, filename: str, data: bytes) -> None:
         """
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
-        # is_owner = check_owner(self, filename)
-        # if you're not the owner, the file might've been revoked (and the file_key changed) so
-        # update your file_key
-
         generate_metadata = False
 
         # check if a file_key already exists; if so, use the same one. if not, make new file_key
@@ -215,11 +209,6 @@ class User:
 
         # if necessary, initialize metadata; then store
         if generate_metadata == True:
-            # share_list = util.ObjectToBytes([self.un])
-            # share_list_loc = generate_memloc(file_key, filename+"_sharing")
-            # enc_share_list, _ = sym_enc_sign(file_key, filename+"_sharing", share_list)
-            # dataserver.Set(share_list_loc, enc_share_list)
-            # initialize metadata
             meta = dict()
             meta["current"] = True
         elif not meta["current"]:
@@ -234,10 +223,6 @@ class User:
         enc_meta, _ = sym_enc_sign(
             file_key, "metadata", util.ObjectToBytes(meta))
         dataserver.Set(meta_loc, enc_meta)
-        # block_count_loc = generate_memloc(file_key, filename+"_num_blocks")
-        # enc_num_blocks, _ = sym_enc_sign(
-        #     file_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
-        # dataserver.Set(block_count_loc, enc_num_blocks)
 
         # file slice memlocs
         body_loc = generate_memloc(file_key, f'{filename}_block_{0}')
@@ -258,9 +243,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/download-file.html
         """
-        # is_owner = check_owner(self, filename)
-        # if you're not the owner, the file might've been revoked (and the file_key changed) so
-        # update your file_key
 
         # get file_key
         try:
@@ -292,7 +274,7 @@ class User:
 
         # iterate through all blocks and download them
         doc = bytes()
-        for i in range (0, block_count):
+        for i in range(0, block_count):
             try:
                 # retrieve block
                 curr_loc = generate_memloc(
@@ -306,9 +288,9 @@ class User:
                 raise util.DropboxError(
                     "File could not be found due to malicious action."
                 )
-            
+
             doc += dec_block
-        
+
         return doc
 
     def append_file(self, filename: str, data: bytes) -> None:
@@ -316,9 +298,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/append-file.html
         """
-        # is_owner = check_owner(self, filename)
-        # if you're not the owner, the file might've been revoked (and the file_key changed) so
-        # update your file_key
 
         # get file_key
         try:
@@ -358,13 +337,14 @@ class User:
             last_block_loc = generate_memloc(
                 file_key, f'{filename}_block_{block_count - 1}')
             last_block = dataserver.Get(last_block_loc)
-            
+
             # decrypt and verify block - this function throws util.DropboxError if integrity violation is detected
             dec_block = sym_verify_dec(
                 file_key, f'{filename}_block_{block_count - 1}', last_block)
         except ValueError:
-            raise util.DropboxError("File could not be found due to malicious action.")
-        
+            raise util.DropboxError(
+                "File could not be found due to malicious action.")
+
         # combine and slice
         to_append = dec_block + data
         body, tail = slice_file(to_append)
@@ -393,10 +373,6 @@ class User:
             enc_meta, _ = sym_enc_sign(
                 file_key, "metadata", util.ObjectToBytes(meta))
             dataserver.Set(meta_loc, enc_meta)
-
-            # enc_num_blocks, _ = sym_enc_sign(
-            #     file_key, filename+"_num_blocks", block_count.to_bytes(16, 'little'))
-            # dataserver.Set(block_count_loc, enc_num_blocks)
 
     def share_file(self, filename: str, recipient: str) -> None:
         """
@@ -430,7 +406,7 @@ class User:
         sharing_string = filename+"_sharing_"+self.un+"_"+recipient
         sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
         shared_dict_loc = generate_memloc(
-            sharing_key, filename+"_sharing_"+self.un+"_"+recipient
+            sharing_key, sharing_string
         )
 
         print(sharing_string, sharing_key, shared_dict_loc)
@@ -482,20 +458,6 @@ class User:
             self.base_key, "shared_with_dict", shared_with_bytes)
         dataserver.Set(shared_with_loc, enc_shared_with)
 
-        # share_list_loc = generate_memloc(
-        #     file_key, filename+"_sharing"
-        # )
-        # share_list = util.BytesToObject(
-        #     sym_verify_dec(
-        #         file_key, filename+"_sharing", dataserver.Get(share_list_loc)
-        #     )
-        # )
-        # share_list.append(recipient)
-        # enc_share_list, _ = sym_enc_sign(
-        #     file_key, filename+"_sharing", util.ObjectToBytes(share_list)
-        # )
-        # dataserver.Set(share_list_loc, enc_share_list)
-
     def receive_file(self, filename: str, sender: str) -> None:
         """
         The specification for this function is at:
@@ -506,7 +468,7 @@ class User:
             sharing_string = filename+"_sharing_"+sender+"_"+self.un
             sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
             shared_dict_loc = generate_memloc(
-                sharing_key, filename+"_sharing_"+sender+"_"+self.un
+                sharing_key, sharing_string
             )
             enc_shared_dict = dataserver.Get(shared_dict_loc)
             shared_dict = util.BytesToObject(sym_verify_dec(
@@ -647,24 +609,6 @@ class User:
         enc_shared_with, _ = sym_enc_sign(
             self.base_key, "shared_with_dict", shared_with_bytes)
         dataserver.Set(shared_with_loc, enc_shared_with)
-
-
-def check_owner(self: User, filename: str) -> str:
-    """
-    Based on a User object and a filename, determines who the owner User is.
-
-    Parameters:
-        - self: a User object
-        - filename: a filename string
-    Returns:
-        - a string representing the username of the owner User
-    """
-    if len(self.shared_files) == 0:
-        return self.un
-    elif filename in self.shared_files:
-        return self.shared_files[filename]
-    else:
-        return self.un
 
 
 def slice_file(data: bytes) -> tuple[bytes, bytes]:
@@ -819,7 +763,8 @@ def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     bytestring = crypto.HashKDF(base_key, purpose+"_memloc")
     return memloc.MakeFromBytes(bytestring)
 
-def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey, 
+
+def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
                   sign_key: crypto.SignatureSignKey, data: bytes) -> None:
     """
     Asymmetrically encrypts and then digitally signs some data.
@@ -832,6 +777,7 @@ def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
     enc_data = crypto.AsymmetricEncrypt(enc_key, data)
     sign_data = crypto.SignatureSign(sign_key, enc_data)
     return enc_data, sign_data
+
 
 def create_user(username: str, password: str) -> User:
     """
