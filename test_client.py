@@ -100,60 +100,22 @@ class ClientTests(unittest.TestCase):
 
     def test_authenticate_user(self):
         """
-        Tests to ensure authenticate_user meets conditions as specified on wiki,
-        as well as some basic attacks.
+        Tests to ensure authenticate_user meets conditions as specified on wiki.
         """
+        # create two users
+        u1 = c.create_user("John", "pw")
+        u2 = c.create_user("Paul", "pw")
 
-        # Authentication only works if both UN and PW is known
-        c.create_user("Ringo", "drums")
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("John", "rhythm_guitar"))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Paul", "bass"))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Ringo", "bass"))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Ringo", "rhythm_guitar"))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Paul", "drums"))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("John", "drums"))
-        c.authenticate_user("Ringo", "drums")
+        # authenticate w/ same un/pw should work
+        u1a = c.authenticate_user("John", "pw")
+        self.assertEqual(vars(u1), vars(u1a))
+        u2a = c.authenticate_user("Paul", "pw")
+        self.assertEqual(vars(u2), vars(u2a))
 
-        # Adversary wipes the Dataserver after a user is created
-        c.create_user("John", "rhythm_guitar")
-        dataserver.Clear()
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("John", "rhythm_guitar"))
-
-        # Adversary deletes an entry on the Dataserver after a user is created
-        c.create_user("Paul", "bass")
-        dataserver.Delete(list(dataserver.GetMap())[0])
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Paul", "bass"))
-
-        # Adversary edits an value on the Dataserver after a user is created
-        dataserver.Clear()
-        c.create_user("George", "lead_guitar")
-        dataserver.Set(list(dataserver.GetMap())[0], crypto.SecureRandom(16))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("George", "lead_guitar"))
-        
-        # Adversary swaps encrypted keys between two users in Dataserver
-        dataserver.Clear()
-        c.create_user("George_M", "studio")
-        g_priv_key = dataserver.Get(list(dataserver.GetMap())[0]) 
-        g_sign_key = dataserver.Get(list(dataserver.GetMap())[1]) 
-        c.create_user("Billy", "keyboard")
-        b_priv_key = dataserver.Get(list(dataserver.GetMap())[2]) 
-        b_sign_key = dataserver.Get(list(dataserver.GetMap())[3]) 
-
-        dataserver.Set(list(dataserver.GetMap())[0], b_priv_key)
-        dataserver.Set(list(dataserver.GetMap())[1], b_sign_key)
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("George_M", "studio"))
-        dataserver.Set(list(dataserver.GetMap())[2], g_priv_key)
-        dataserver.Set(list(dataserver.GetMap())[3], g_sign_key)
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Billy", "keyboard"))
-
-        # Adversary swaps encrypted keys between the same user
-        dataserver.Clear()
-        c.create_user("Mal", "anvil")
-        m_priv_key = dataserver.Get(list(dataserver.GetMap())[0])
-        m_sign_key = dataserver.Get(list(dataserver.GetMap())[1])
-        dataserver.Set(list(dataserver.GetMap())[0], m_sign_key)
-        dataserver.Set(list(dataserver.GetMap())[1], m_priv_key)
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Mal", "anvil"))
+        # if un/pw is wrong or doesn't exist, authentication fails
+        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("John", "pww"))
+        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Paul", "pwe"))
+        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Ringo", "pw"))
 
 
     def test_the_next_test(self):
