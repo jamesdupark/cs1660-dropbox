@@ -187,7 +187,7 @@ class User:
             # download metadata
             meta_loc = generate_memloc(file_key, "metadata")
             enc_meta = dataserver.Get(meta_loc)
-            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta_bytes = sym_verify_dec(file_key, "metadata", enc_meta)
             meta = util.BytesToObject(meta_bytes)
         except ValueError:
             generate_metadata = True
@@ -260,7 +260,7 @@ class User:
         try:
             meta_loc = generate_memloc(file_key, "metadata")
             enc_meta = dataserver.Get(meta_loc)
-            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta_bytes = sym_verify_dec(file_key, "metadata", enc_meta)
             meta = util.BytesToObject(meta_bytes)
 
             block_count = meta["block_count"]
@@ -316,7 +316,7 @@ class User:
             # download metadata
             meta_loc = generate_memloc(file_key, "metadata")
             enc_meta = dataserver.Get(meta_loc)
-            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta_bytes = sym_verify_dec(file_key, "metadata", enc_meta)
             meta = util.BytesToObject(meta_bytes)
 
             block_count = meta["block_count"]
@@ -532,7 +532,7 @@ class User:
         try:
             meta_loc = generate_memloc(file_key, "metadata")
             enc_meta = dataserver.Get(meta_loc)
-            meta_bytes = sym_decrypt(file_key, "metadata", enc_meta)
+            meta_bytes = sym_verify_dec(file_key, "metadata", enc_meta)
             meta = util.BytesToObject(meta_bytes)
 
             meta["current"] = False
