@@ -63,16 +63,22 @@ class ClientTests(unittest.TestCase):
         """
         u1 = c.create_user("usr1", "pswd")
         u2 = c.create_user("usr2", "pswd")
+        u3 = c.create_user("usr3", "pswd")
 
         u1.upload_file("shared_file", b'shared data')
         u1.share_file("shared_file", "usr2")
+        u1.share_file("shared_file", "usr3")
 
         u2.receive_file("shared_file", "usr1")
+        u3.receive_file("shared_file", "usr1")
         down_data = u2.download_file("shared_file")
 
         self.assertEqual(down_data, b'shared data')
 
         u1.revoke_file("shared_file", "usr2")
+
+        data_2 = u3.download_file("shared_file")
+        self.assertEqual(data_2, b'shared data')
         self.assertRaises(util.DropboxError, lambda: u2.download_file("shared_file"))
 
     def test_download_error(self):

@@ -173,7 +173,6 @@ class User:
         The specification for this function is at:
         http://cs.brown.edu/courses/csci1660/dropbox-wiki/client-api/storage/upload-file.html
         """
-        generate_metadata = False
 
         # check if a file_key already exists; if so, use the same one. if not, make new file_key
         try:
@@ -183,14 +182,7 @@ class User:
                 self.base_key, filename +
                 "_master_key", dataserver.Get(file_key_loc)
             )
-
-            # download metadata
-            meta_loc = generate_memloc(file_key, "metadata")
-            enc_meta = dataserver.Get(meta_loc)
-            meta_bytes = sym_verify_dec(file_key, "metadata", enc_meta)
-            meta = util.BytesToObject(meta_bytes)
         except ValueError:
-            generate_metadata = True
             # generate file key for this file
             file_key = crypto.HashKDF(
                 self.base_key, filename+crypto.SecureRandom(16).decode(errors='backslashreplace'))
@@ -198,6 +190,16 @@ class User:
             enc_file_key, _ = sym_enc_sign(
                 self.base_key, filename+"_master_key", file_key)
             dataserver.Set(file_key_loc, enc_file_key)
+
+            # generate metadata
+            meta = dict()
+            meta["current"] = True
+        else:
+            # download metadata
+            meta_loc = generate_memloc(file_key, "metadata")
+            enc_meta = dataserver.Get(meta_loc)
+            meta_bytes = sym_verify_dec(file_key, "metadata", enc_meta)
+            meta = util.BytesToObject(meta_bytes)
 
         # slice file
         body, tail = slice_file(data)
@@ -207,11 +209,7 @@ class User:
         if body == tail:
             block_count = 1
 
-        # if necessary, initialize metadata; then store
-        if generate_metadata == True:
-            meta = dict()
-            meta["current"] = True
-        elif not meta["current"]:
+        if not meta["current"]:
             # call recieve_file as necessary or fail b/c you've been revoked --> remove from shared_files
             self.receive_file(filename, self.shared_files[filename])
             self.upload_file(filename, data)
@@ -396,9 +394,6 @@ class User:
             dec_shared_file_bytes = sym_verify_dec(
                 self.base_key, "shared_with_dict", enc_shared_w_bytes)
             self.shared_with = util.BytesToObject(dec_shared_file_bytes)
-
-            if filename in self.shared_with and recipient in self.shared_with[filename]:
-                return
         except ValueError:
             raise util.DropboxError("shared_with dictionary not found!")
 
@@ -408,8 +403,6 @@ class User:
         shared_dict_loc = generate_memloc(
             sharing_key, sharing_string
         )
-
-        print(sharing_string, sharing_key, shared_dict_loc)
 
         # get recipient pub_key
         try:
@@ -446,7 +439,8 @@ class User:
 
         # update shared_with
         if filename in self.shared_with.keys():
-            self.shared_with[filename].append(recipient)
+            if recipient not in self.shared_with[filename]:
+                self.shared_with[filename].append(recipient)
         else:
             self.shared_with[filename] = [recipient]
 
@@ -478,6 +472,30 @@ class User:
         except ValueError:
             raise util.DropboxError("No such file shared with "+self.un+".")
 
+        file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
+        # check for duplicate file
+        try:
+            enc_key = dataserver.Get(file_key_loc)
+            file_key = sym_verify_dec(self.base_key, filename+"_master_key", enc_key)
+
+            # get metadata
+            try:
+                # download metadata
+                meta_loc = generate_memloc(file_key, "metadata")
+                enc_meta = dataserver.Get(meta_loc)
+                meta_bytes = sym_verify_dec(file_key, "metadata", enc_meta)
+                meta = util.BytesToObject(meta_bytes)
+            except ValueError:
+                raise util.DropboxError("No such file found")
+        except ValueError:
+            # no duplicate, can proceed
+            pass
+        else:
+            if meta["current"]:
+                # not updating key
+                raise util.DropboxError(
+                    "file with name: "+filename+" already exists!")
+
         # retrieve file_key and file_signature
         enc_file_key = shared_dict[filename][0]
         file_signature = shared_dict[filename][1]
@@ -492,11 +510,9 @@ class User:
             raise util.DropboxError("File corrupted.")
         file_key = crypto.AsymmetricDecrypt(self.priv_key, enc_file_key)
 
-        # store this file key for the User
-        file_key_loc = generate_memloc(self.base_key, filename+"_master_key")
         enc_file_key, _ = sym_enc_sign(
             self.base_key, filename+"_master_key", file_key
-        )
+        )        
         dataserver.Set(file_key_loc, enc_file_key)
 
         # set User object to reflect new file
@@ -575,6 +591,12 @@ class User:
         # remove from shared_with
         self.shared_with[filename].remove(old_recipient)
 
+        # update shared_with on dataserver
+        shared_with_bytes = util.ObjectToBytes(self.shared_with)
+        enc_shared_with, _ = sym_enc_sign(
+            self.base_key, "shared_with_dict", shared_with_bytes)
+        dataserver.Set(shared_w_loc, enc_shared_with)
+
         # remove from shared dict
         try:
             sharing_string = filename+"_sharing_"+self.un+"_"+old_recipient
@@ -587,7 +609,7 @@ class User:
 
             shared_dict[filename] = []
 
-            # add file_key and file_signature to shared_dict_loc
+            # push to shared_dict_loc
             shared_dict_bytes = util.ObjectToBytes(shared_dict)
             enc_shared_dict, _ = sym_enc_sign(
                 sharing_key, sharing_string, shared_dict_bytes)
@@ -601,14 +623,6 @@ class User:
         # call share_file on the file for each user in the shared list
         for recipient in self.shared_with[filename]:
             self.share_file(filename, recipient)
-
-        # update shared_with on dataserver
-        shared_with_loc = generate_memloc(
-            self.base_key, "shared_with_dict")
-        shared_with_bytes = util.ObjectToBytes(self.shared_with)
-        enc_shared_with, _ = sym_enc_sign(
-            self.base_key, "shared_with_dict", shared_with_bytes)
-        dataserver.Set(shared_with_loc, enc_shared_with)
 
 
 def slice_file(data: bytes) -> tuple[bytes, bytes]:
