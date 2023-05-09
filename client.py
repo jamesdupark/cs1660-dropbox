@@ -860,21 +860,3 @@ def authenticate_user(username: str, password: str) -> User:
 
     # If both pass, return the User object
     return current_user
-
-
-# u1 = create_user("Paul", "pw")
-# u2 = create_user("John", "pw")
-
-# u1.upload_file("file1", b"content")
-# u1.append_file("file1", b"_morecontent")
-# # print(u1.download_file("file1"))
-
-# u1.share_file("file1", "John")
-# u2.receive_file("file1", "Paul")
-# print(u2.download_file("file1"))
-# u2.upload_file("file1", b"different_content")
-# print(u2.download_file("file1"))
-# print(u1.download_file("file1"))
-# u2.append_file("file1", b"_andevenmore")
-# print(u2.download_file("file1"))
-# print(u1.download_file("file1"))

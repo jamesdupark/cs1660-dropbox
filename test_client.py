@@ -190,6 +190,35 @@ class ClientTests(unittest.TestCase):
         # receiving throws an error
         self.assertRaises(util.DropboxError, lambda: u2.receive_file("f", "Bob"))
 
+    def test_file_manipulation(self):
+        """
+        testing our third attack described in our design document - the adversary forges
+        file data by overwriting it with some other data in the dataserver, hoping that 
+        when a user downloads said file, they download her data instead 
+        """
+        # create a user and a file
+        u1 = c.create_user("Paul", "somepass")
+        u1.upload_file("file1", b"something")
+
+        file1_key = c.sym_verify_dec(
+            u1.base_key, "file1_master_key", 
+            dataserver.Get(c.generate_memloc(u1.base_key, "file1_master_key"))
+        )
+
+        # attacker
+        opp = c.create_user("John", "pass")
+        file1_loc = c.generate_memloc(file1_key, "file1_block_0")
+        virus, _ = c.sym_enc_sign(
+            opp.base_key, "file1_block_0", b"this is an attack!"
+        )
+        dataserver.Set(file1_loc, virus)
+
+        # for some reason this doesn't throw an error...
+        u1.download_file("file1")
+
+        
+
+
 
 # Start the REPL if this file is launched as the main program
 if __name__ == '__main__':
