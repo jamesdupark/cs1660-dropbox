@@ -1,5 +1,5 @@
 ##
-## test_client.py - Test for your client
+# test_client.py - Test for your client
 ##
 ##
 
@@ -16,7 +16,7 @@ from support.keyserver import keyserver
 import client as c
 
 # Use this in place of the above line to test using the reference client
-#import dropbox_client_reference as c
+# import dropbox_client_reference as c
 
 
 class ClientTests(unittest.TestCase):
@@ -79,7 +79,8 @@ class ClientTests(unittest.TestCase):
 
         data_2 = u3.download_file("shared_file")
         self.assertEqual(data_2, b'shared data')
-        self.assertRaises(util.DropboxError, lambda: u2.download_file("shared_file"))
+        self.assertRaises(util.DropboxError,
+                          lambda: u2.download_file("shared_file"))
 
     def test_download_error(self):
         """
@@ -98,7 +99,8 @@ class ClientTests(unittest.TestCase):
         """
         # Case sensitive usernames:
         user_1 = c.create_user("John", "yoko")
-        self.assertRaises(util.DropboxError, lambda: c.create_user("John", "yoko_ono"))
+        self.assertRaises(util.DropboxError,
+                          lambda: c.create_user("John", "yoko_ono"))
 
         # Users may choose the same password:
         user_2 = c.create_user("Paul", "yoko")
@@ -119,10 +121,12 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(vars(u2), vars(u2a))
 
         # if un/pw is wrong or doesn't exist, authentication fails
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("John", "pww"))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Paul", "pwe"))
-        self.assertRaises(util.DropboxError, lambda: c.authenticate_user("Ringo", "pw"))
-
+        self.assertRaises(util.DropboxError,
+                          lambda: c.authenticate_user("John", "pww"))
+        self.assertRaises(util.DropboxError,
+                          lambda: c.authenticate_user("Paul", "pwe"))
+        self.assertRaises(util.DropboxError,
+                          lambda: c.authenticate_user("Ringo", "pw"))
 
     def test_the_next_test(self):
         """
@@ -133,6 +137,58 @@ class ClientTests(unittest.TestCase):
         cases: https://docs.python.org/3/library/unittest.html
         """
         self.assertTrue(True)
+
+    def test_auth_overwrite(self):
+        """
+        Testing the first attack described in our design document - malicious user overwrites
+        another user's private keys - our system detects the integrity violation and raises an error
+        """
+        # create user
+        u1 = c.create_user("Bob", "pw")
+
+        # get the locations of the private keys
+        priv_key_loc = c.generate_memloc(
+            u1.base_key, u1.un+"_priv_key_storage")
+        sign_key_loc = c.generate_memloc(
+            u1.base_key, u1.un+"_sign_key_storage")
+
+        # generate malicious user
+        u2 = c.create_user("Eve", "password")
+
+        # replace sign keys with Eve's keys
+        dataserver.Set(priv_key_loc, bytes(u2.priv_key))
+        dataserver.Set(sign_key_loc, bytes(u2.sign_key))
+
+        # authenticating as Bob throws an error
+        self.assertRaises(util.DropboxError,
+                          lambda: c.authenticate_user("Bob", "pw"))
+
+    def test_false_revocation(self):
+        """
+        testing the second attack described in our design document - malicious user forges
+        a false sharing dictionary so that the system thinks the recipient has been revoked.
+        Our system detects this as an integrity violation and moves on
+        """
+        # create two normal users
+        u1 = c.create_user("Bob", "pw")
+        u2 = c.create_user("Alice", "pw")
+
+        # u1 shares a file w/u2
+        u1.upload_file("f", b'')
+        u1.share_file("f", "Alice")
+
+        # attacker modifies sharing dictionary
+        sharing_string = "f"+"_sharing_"+u1.un+"_"+u2.un
+        sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+        shared_dict_loc = c.generate_memloc(
+            sharing_key, sharing_string
+        )
+        mal_dict = { "f" : [] }
+        mal_dict_bytes = util.ObjectToBytes(mal_dict)
+        dataserver.Set(shared_dict_loc, mal_dict_bytes)
+
+        # receiving throws an error
+        self.assertRaises(util.DropboxError, lambda: u2.receive_file("f", "Bob"))
 
 
 # Start the REPL if this file is launched as the main program
