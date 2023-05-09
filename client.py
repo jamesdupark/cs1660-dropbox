@@ -399,41 +399,37 @@ class User:
 
         # generate common memloc
         sharing_string = filename+"_sharing_"+self.un+"_"+recipient
+        sharing_string_sign = filename+"_sharing_"+self.un+"_"+recipient+"_signature"
         sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
-        shared_dict_loc = generate_memloc(
-            sharing_key, sharing_string
-        )
+        shared_dict_loc = generate_memloc(sharing_key, sharing_string)
+        shared_dict_sign_loc = generate_memloc(sharing_key, sharing_string_sign)
 
         # get recipient pub_key
         try:
             recipient_pub_key = keyserver.Get(recipient+"_pub_key")
         except ValueError:
             raise util.DropboxError("No such recipient found.")
-
-        # create assymetric key encryption and signature for file_key
-        enc_file_key, file_signature = asym_enc_sign(
-            recipient_pub_key, self.sign_key, file_key
-        )
-
+        
         # determine if there is a shared dict already; if not, create
         try:
             dataserver.Get(shared_dict_loc)
         except ValueError:
             shared_dict_bytes = util.ObjectToBytes(dict())
-            enc_shared_dict, _ = sym_enc_sign(
-                sharing_key, sharing_string, shared_dict_bytes)
+            
+            enc_shared_dict, enc_shared_sign = asym_enc_sign(
+                recipient_pub_key, self.sign_key, shared_dict_bytes
+            )
             dataserver.Set(shared_dict_loc, enc_shared_dict)
+            dataserver.Set(shared_dict_sign_loc, enc_shared_sign)
 
         # add file_key and file_signature to shared_dict_loc
-        enc_shared_dict = dataserver.Get(shared_dict_loc)
-        dec_shared_dict = sym_verify_dec(
-            sharing_key, sharing_string, enc_shared_dict)
-        shared_dict = util.BytesToObject(dec_shared_dict)
-        shared_dict[filename] = [enc_file_key, file_signature]
+        shared_dict = dict()
+        shared_dict[filename] = [file_key]
         shared_dict_bytes = util.ObjectToBytes(shared_dict)
-        enc_shared_dict, _ = sym_enc_sign(
-            sharing_key, sharing_string, shared_dict_bytes)
+        enc_shared_dict, enc_shared_sign = asym_enc_sign(
+            recipient_pub_key, self.sign_key, shared_dict_bytes)
         dataserver.Set(shared_dict_loc, enc_shared_dict)
+        dataserver.Set(shared_dict_sign_loc, enc_shared_sign)
 
         # add recipient to file sharing metadata
 
@@ -461,12 +457,16 @@ class User:
         try:
             sharing_string = filename+"_sharing_"+sender+"_"+self.un
             sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
-            shared_dict_loc = generate_memloc(
-                sharing_key, sharing_string
-            )
+            shared_dict_loc = generate_memloc(sharing_key, sharing_string)
             enc_shared_dict = dataserver.Get(shared_dict_loc)
-            shared_dict = util.BytesToObject(sym_verify_dec(
-                sharing_key, sharing_string, enc_shared_dict))
+
+            sharing_string_sign = filename+"_sharing_"+sender+"_"+self.un+"_signature"
+            shared_dict_sign_loc = generate_memloc(sharing_key, sharing_string_sign)
+            shared_dict_bytes = asym_verify_dec(
+                self.priv_key, keyserver.Get(sender+"_verify_key"), 
+                dataserver.Get(shared_dict_sign_loc), enc_shared_dict)
+            shared_dict = util.BytesToObject(shared_dict_bytes)
+            
             if len(shared_dict[filename]) == 0:
                 raise util.DropboxError("File has been revoked!")
         except ValueError:
@@ -497,18 +497,7 @@ class User:
                     "file with name: "+filename+" already exists!")
 
         # retrieve file_key and file_signature
-        enc_file_key = shared_dict[filename][0]
-        file_signature = shared_dict[filename][1]
-
-        # decrypt file_key and verify signature
-        try:
-            crypto.SignatureVerify(
-                keyserver.Get(
-                    sender+"_verify_key"), enc_file_key, file_signature
-            )
-        except:
-            raise util.DropboxError("File corrupted.")
-        file_key = crypto.AsymmetricDecrypt(self.priv_key, enc_file_key)
+        file_key = shared_dict[filename][0]
 
         enc_file_key, _ = sym_enc_sign(
             self.base_key, filename+"_master_key", file_key
@@ -603,16 +592,14 @@ class User:
             sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
             shared_dict_loc = generate_memloc(sharing_key, sharing_string)
 
-            enc_shared_dict = dataserver.Get(shared_dict_loc)
-            shared_dict = util.BytesToObject(sym_verify_dec(
-                sharing_key, sharing_string, enc_shared_dict))
-
+            shared_dict = dict()
             shared_dict[filename] = []
 
             # push to shared_dict_loc
             shared_dict_bytes = util.ObjectToBytes(shared_dict)
-            enc_shared_dict, _ = sym_enc_sign(
-                sharing_key, sharing_string, shared_dict_bytes)
+            enc_shared_dict, _ = asym_enc_sign(
+                keyserver.Get(old_recipient+"_pub_key"), self.sign_key,
+                shared_dict_bytes)
             dataserver.Set(shared_dict_loc, enc_shared_dict)
         except ValueError:
             raise util.DropboxError("No such file shared with "+self.un+".")
@@ -762,6 +749,28 @@ def sym_verify_dec(base_key: bytes, purpose: str, data: bytes) -> bytes:
     dec_data = sym_decrypt(base_key, purpose, data)
 
     return dec_data
+
+def asym_verify_dec(priv_key: bytes, verify_key: bytes, signature: bytes, data: bytes) -> bytes:
+    """
+    Given some data, a private key, and a verify key, attempts to asymmetrically
+    decrypt and verify the data.
+
+    Parameters:
+        - priv_key: an asymmetric private key
+        - verify_key: a verification key
+        - signature: the signature to verify
+        - data: some encrypted data
+    Raises:
+        - util.DropboxError if verification fails
+    Returns:
+        - the decrypted data
+    """
+    if crypto.SignatureVerify(verify_key, data, signature) == False:
+        raise util.DropboxError("File metadata corrupted.")
+    dec_data = crypto.AsymmetricDecrypt(priv_key, data)
+    return dec_data
+
+
 
 
 def generate_memloc(base_key: bytes, purpose: str) -> memloc:
