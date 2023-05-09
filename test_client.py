@@ -190,7 +190,7 @@ class ClientTests(unittest.TestCase):
         # receiving throws an error
         self.assertRaises(util.DropboxError, lambda: u2.receive_file("f", "Bob"))
 
-    def test_file_manipulation(self):
+    def test_file_metadata_manipulation(self):
         """
         testing our third attack described in our design document - the adversary forges
         file data by overwriting it with some other data in the dataserver, hoping that 
@@ -200,25 +200,95 @@ class ClientTests(unittest.TestCase):
         u1 = c.create_user("Paul", "somepass")
         u1.upload_file("file1", b"something")
 
+        # for reference
         file1_key = c.sym_verify_dec(
             u1.base_key, "file1_master_key", 
             dataserver.Get(c.generate_memloc(u1.base_key, "file1_master_key"))
         )
+        file1_metadata_loc = c.generate_memloc(file1_key, "metadata")
 
-        # attacker
+        # create an attacker and a "virus" to be placed in the metadata location
         opp = c.create_user("John", "pass")
-        file1_loc = c.generate_memloc(file1_key, "file1_block_0")
         virus, _ = c.sym_enc_sign(
-            opp.base_key, "file1_block_0", b"this is an attack!"
+            opp.base_key, "file1_block_0", c.util.ObjectToBytes({"block_count": 2})
         )
-        dataserver.Set(file1_loc, virus)
+        dataserver.Set(file1_metadata_loc, virus)
 
-        # for some reason this doesn't throw an error...
-        u1.download_file("file1")
+        # the attacker then adds their own special block at a location where download_file()
+        # might eventually reach
+
+        file1_eventual_block_loc = c.generate_memloc(file1_key, f'file1_block_{1}')
+        dataserver.Set(file1_eventual_block_loc, b"an attack!")
+
+        # the block_count should strictly be 1, as the original uploaded_file was not
+        # large enough to warrant slicing, but the attacker is trying to set it at
+        # 2 so that a user will download a file that would thero    
+
+        # metadata corrupted, throw an error!
+        self.assertRaises(util.DropboxError, lambda: u1.download_file("file1"))
+    
+    def test_unshared_receive(self):
+        """
+        testing our fourth attack described in our design document - the adversary somehow figures
+        out a filename and the username of its owner, and attempts to call receieve_file().
+        In addition, the adversary manages to figure out the location of the shared dictionary
+        between two users for a shared file, but is unable to access it because it is
+        asymmetrically encrypted using the intended recipient's public key- tampering this dict
+        would also result in an integrity violation and a DropboxError for the recipient.
+        """
+        # create two normal users
+        u1 = c.create_user("Bob", "pw")
+        u2 = c.create_user("Joan", "bw")
+
+        # adversary
+        opp = c.create_user("John", "pw")
+
+        # create a file
+        u1.upload_file("BoTT", b"Shelter")
+
+        # adversary attempts to access knowing the owner + filename, but fails
+        self.assertRaises(util.DropboxError, lambda: opp.receive_file("BoTT", "Bob"))
+
+        # adversary figures out the memloc of a shared_dict between two users
+        u1.share_file("BoTT", "Joan")
+        u2.receive_file("BoTT", "Bob")
 
         
+        sharing_string = "BoTT"+"_sharing_"+"Bob"+"_"+"Joan"
+        sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+        shared_dict_loc = c.generate_memloc(sharing_key, sharing_string)
+        enc_shared_dict = dataserver.Get(shared_dict_loc)
+        sharing_string_sign = "BoTT"+"_sharing_"+"Bob"+"_"+"Joan"+"_signature"
+        shared_dict_sign_loc = c.generate_memloc(sharing_key, sharing_string_sign)
 
+        # adversary attempt to decrypt will fail, as it is asymmetrically encrypted and signed
+        self.assertRaises(ValueError, lambda: c.asym_verify_dec(
+            opp.priv_key, keyserver.Get("Bob_verify_key"), 
+            dataserver.Get(shared_dict_sign_loc), enc_shared_dict))
+        
+        # if the adversary adds a phony dictionary, it will be realized as an integrity error
+        u1.upload_file("NewMorn", b"Just")
+        u1.share_file("NewMorn", "Joan")
 
+        sharing_string = "NewMorn"+"_sharing_"+"Bob"+"_"+"Joan"
+        sharing_key = crypto.Hash(sharing_string.encode("utf-8"))[:16]
+        shared_dict_loc = c.generate_memloc(sharing_key, sharing_string)
+        enc_shared_dict = dataserver.Get(shared_dict_loc)
+        sharing_string_sign = "NewMorn"+"_sharing_"+"Bob"+"_"+"Joan"+"_signature"
+        shared_dict_sign_loc = c.generate_memloc(sharing_key, sharing_string_sign)
+
+        phony_shared_dict, phony_shared_signature = c.asym_enc_sign(
+            keyserver.Get("Joan_pub_key"), 
+            opp.sign_key,
+            util.ObjectToBytes({"NewMorn": b"signature"})
+        )
+        
+        dataserver.Set(shared_dict_loc, phony_shared_dict)
+        dataserver.Set(shared_dict_sign_loc, phony_shared_signature)
+
+        # when Joan tries receive, an error occurs
+        self.assertRaises(util.DropboxError, lambda: u2.receive_file("NewMorn", "Bob")) 
+        
 
 # Start the REPL if this file is launched as the main program
 if __name__ == '__main__':

@@ -668,7 +668,6 @@ def sym_decrypt(base_key: bytes, purpose: str, data: bytes) -> bytes:
     dec_data = crypto.SymmetricDecrypt(enc_key, data)
     return dec_data
 
-
 def sym_hmac(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
     Generates an HMAC for the given data. Must only be called on data that has already been
@@ -684,7 +683,6 @@ def sym_hmac(base_key: bytes, purpose: str, data: bytes) -> bytes:
     sign_key = crypto.HashKDF(base_key, purpose+"_sym_sign")
     hmac = crypto.HMAC(sign_key, data)
     return hmac
-
 
 def sym_enc_sign(base_key: bytes, purpose: str, data: bytes) -> None:
     """
@@ -704,7 +702,6 @@ def sym_enc_sign(base_key: bytes, purpose: str, data: bytes) -> None:
     dataserver.Set(generate_memloc(base_key, purpose+"_hmac_store"), hmac)
     return enc_data, hmac
 
-
 def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
                   sign_key: crypto.SignatureSignKey, data: bytes) -> tuple[bytes, bytes]:
     """
@@ -719,7 +716,6 @@ def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
     enc_data = crypto.AsymmetricEncrypt(enc_key, data)
     sign_data = crypto.SignatureSign(sign_key, enc_data)
     return enc_data, sign_data
-
 
 def sym_verify_dec(base_key: bytes, purpose: str, data: bytes) -> bytes:
     """
@@ -770,9 +766,6 @@ def asym_verify_dec(priv_key: bytes, verify_key: bytes, signature: bytes, data: 
     dec_data = crypto.AsymmetricDecrypt(priv_key, data)
     return dec_data
 
-
-
-
 def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     """
     Generates a memloc for the given purpose from the given base_key using HashKDF.
@@ -785,7 +778,6 @@ def generate_memloc(base_key: bytes, purpose: str) -> memloc:
     """
     bytestring = crypto.HashKDF(base_key, purpose+"_memloc")
     return memloc.MakeFromBytes(bytestring)
-
 
 def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
                   sign_key: crypto.SignatureSignKey, data: bytes) -> None:
@@ -800,7 +792,6 @@ def asym_enc_sign(enc_key: crypto.AsymmetricEncryptKey,
     enc_data = crypto.AsymmetricEncrypt(enc_key, data)
     sign_data = crypto.SignatureSign(sign_key, enc_data)
     return enc_data, sign_data
-
 
 def create_user(username: str, password: str) -> User:
     """
