@@ -1,1 +1,3 @@
 # cs1660-dropbox
+
+This project was done in collaboration with [Joon Nam](https://github.com/Hyun15) for our CSCI 1660: Introduction to Computer Systems Security course at Brown University. Our task was to design and implement a secure file storage system with basic sharing using a secure but limited keyserver for storing asymmetric encryption keys and an insecure but unlimited dataserver, as well as model potential threats to integrity, confidentiality, and availability and describe how our system protects against these attacks. Due to the course collaboration policy, the full repo cannot be made public. Code can be made available upon individual request.
